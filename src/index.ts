@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from "express"
 import dotenv from "dotenv"
 import { connectDatabase } from "./config/database"
 import rewardsRoutes from "./routes/rewards"
+import etfsRoutes from "./routes/etfs"
 
 import "./jobs/event"
 import "./jobs/reward"
@@ -11,6 +12,24 @@ dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 8000
+
+// CORS middleware - allow all origins
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.header("Access-Control-Allow-Origin", "*")
+  res.header(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+  )
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+  )
+  if (req.method === "OPTIONS") {
+    res.sendStatus(200)
+    return
+  }
+  next()
+})
 
 // Middleware
 app.use(express.json())
@@ -41,6 +60,7 @@ app.get("/health", (req: Request, res: Response) => {
 
 // API routes
 app.use("/api/rewards", rewardsRoutes)
+app.use("/api/etfs", etfsRoutes)
 
 // 404 handler
 app.use((req: Request, res: Response) => {

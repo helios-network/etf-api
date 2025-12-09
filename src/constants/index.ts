@@ -3,9 +3,9 @@ import { ChainId } from "../config/web3"
 export const SUPPORTED_ASSETS = {
   [ChainId.MAINNET]: [
     {
-      symbol: "CDT",
+      symbol: "HLS",
       decimals: 18,
-      address: "0xCdB37A4fBC2Da5b78aA4E41a432792f9533e85Cc",
+      address: "0x970a341B4E311A5c7248Dc9c3d8d4f35fEdFA73e",
     },
     {
       symbol: "BNB",
@@ -28,12 +28,7 @@ export const SUPPORTED_ASSETS = {
       address: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
     },
   ],
-  [ChainId.BSC]: [
-    {
-      symbol: "CDT",
-      decimals: 18,
-      address: "0x0cBD6fAdcF8096cC9A43d90B45F65826102e3eCE",
-    },
+  [ChainId.ARBITRUM]: [
     {
       symbol: "BNB",
       decimals: 18,
@@ -57,12 +52,12 @@ export const SUPPORTED_ASSETS = {
   ],
 }
 
-export const LENDING_CONTRACT_ADDRS = {
-  [ChainId.MAINNET]: "0x0000000000000000000000000000000000000000",
-  [ChainId.BSC]: "0x0000000000000000000000000000000000000000",
+export const ETF_CONTRACT_ADDRS = {
+  [ChainId.MAINNET]: "0xb51072C4c27338c0091f61cCa0dFf950b5b0549B",
+  [ChainId.ARBITRUM]: "0x0000000000000000000000000000000000000000",
 }
 
 export const DEFAULT_START_BLOCKS = {
-  [ChainId.MAINNET]: 0n,
-  [ChainId.BSC]: 0n,
+  [ChainId.MAINNET]: 23972372n,
+  [ChainId.ARBITRUM]: 0n,
 }

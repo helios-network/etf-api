@@ -5,16 +5,16 @@ import {
   createWalletClient,
   WalletClient,
 } from "viem"
-import { mainnet, bsc } from "viem/chains"
+import { mainnet, arbitrum } from "viem/chains"
 
 export enum ChainId {
   MAINNET = 1,
-  BSC = 56,
+  ARBITRUM = 42161,
 }
 
 export const DEFAULT_RPC_URLS = {
   [ChainId.MAINNET]: "https://ethereum-rpc.publicnode.com",
-  [ChainId.BSC]: "https://bsc-rpc.publicnode.com",
+  [ChainId.ARBITRUM]: "https://arbitrum-rpc.publicnode.com",
 }
 
 export const publicClients: Record<ChainId, PublicClient> = {
@@ -22,9 +22,9 @@ export const publicClients: Record<ChainId, PublicClient> = {
     chain: mainnet,
     transport: http(DEFAULT_RPC_URLS[ChainId.MAINNET]),
   }),
-  [ChainId.BSC]: createPublicClient({
-    chain: bsc,
-    transport: http(DEFAULT_RPC_URLS[ChainId.BSC]),
+  [ChainId.ARBITRUM]: createPublicClient({
+    chain: arbitrum,
+    transport: http(DEFAULT_RPC_URLS[ChainId.MAINNET]),
   }),
 }
 
@@ -33,13 +33,13 @@ export const walletClients: Record<ChainId, WalletClient> = {
     chain: mainnet,
     transport: http(DEFAULT_RPC_URLS[ChainId.MAINNET]),
   }),
-  [ChainId.BSC]: createWalletClient({
-    chain: bsc,
-    transport: http(DEFAULT_RPC_URLS[ChainId.BSC]),
+  [ChainId.ARBITRUM]: createWalletClient({
+    chain: arbitrum,
+    transport: http(DEFAULT_RPC_URLS[ChainId.ARBITRUM]),
   }),
 }
 
 export const GET_LOGS_BLOCKS = {
   [ChainId.MAINNET]: 1000n,
-  [ChainId.BSC]: 1000n,
+  [ChainId.ARBITRUM]: 1000n,
 }

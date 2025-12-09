@@ -160,35 +160,35 @@ async function distributeRewards(
  * Main function that orchestrates the reward distribution process
  */
 async function processDailyRewards(): Promise<void> {
-  const currentTime = getCurrentTime()
+  // const currentTime = getCurrentTime()
 
-  const poolReward = await getActivePoolReward(currentTime)
-  if (!poolReward) return
+  // const poolReward = await getActivePoolReward(currentTime)
+  // if (!poolReward) return
 
-  const type = poolReward.type === "deposit" ? "deposits" : "borrows"
-  const query = buildQuery(type, poolReward.chain, poolReward.symbol)
-  const dailyReward = calculateDailyReward(poolReward)
+  // const type = poolReward.type === "deposit" ? "deposits" : "borrows"
+  // const query = buildQuery(type, poolReward.chain, poolReward.symbol)
+  // const dailyReward = calculateDailyReward(poolReward)
 
-  // First pass: calculate the total parts
-  const totalParts = await calculateTotalParts(
-    query,
-    type,
-    poolReward.chain,
-    poolReward.symbol
-  )
+  // // First pass: calculate the total parts
+  // const totalParts = await calculateTotalParts(
+  //   query,
+  //   type,
+  //   poolReward.chain,
+  //   poolReward.symbol
+  // )
 
-  if (totalParts === 0n) return
+  // if (totalParts === 0n) return
 
-  // Second pass: distribute the rewards
-  await distributeRewards(
-    query,
-    type,
-    poolReward.chain,
-    poolReward.symbol,
-    dailyReward,
-    totalParts,
-    currentTime
-  )
+  // // Second pass: distribute the rewards
+  // await distributeRewards(
+  //   query,
+  //   type,
+  //   poolReward.chain,
+  //   poolReward.symbol,
+  //   dailyReward,
+  //   totalParts,
+  //   currentTime
+  // )
 }
 
 new CronJob("0 0 0 * * *", processDailyRewards, null, true)

@@ -3,15 +3,28 @@ import mongoose, { Schema, Document } from "mongoose"
 export interface IEvent extends Document {
   type: string
   chain: number
-  user: string
+  user?: string
   token?: string
   amount?: bigint
   nonce: bigint
-  liquidator?: string
-  collateralToken?: string
-  collateralAmount?: bigint
-  debtToken?: string
-  debtRepaid?: bigint
+  vault?: string
+  depositAmount?: string
+  sharesOut?: string
+  sharesIn?: string
+  depositOut?: string
+  fromIndex?: string
+  toIndex?: string
+  moveValue?: string
+  bought?: string
+  imbalanceThresholdBps?: string
+  maxPriceStaleness?: string
+  eventHeight?: string
+  etfNonce?: string
+  etfHeight?: string
+  shareToken?: string
+  depositToken?: string
+  name?: string
+  symbol?: string
   createdAt: Date
   updatedAt: Date
   blockNumber: bigint
@@ -22,7 +35,13 @@ const EventSchema: Schema = new Schema(
   {
     type: {
       type: String,
-      enum: ["Deposited", "Withdrawn", "Borrowed", "Repaid", "Liquidated"],
+      enum: [
+        "Deposit",
+        "Redeem",
+        "ETFCreated",
+        "Rebalance",
+        "ParamsUpdated",
+      ],
       required: true,
     },
     chain: {
@@ -31,7 +50,7 @@ const EventSchema: Schema = new Schema(
     },
     user: {
       type: String,
-      required: true,
+      required: false,
     },
     token: {
       type: String,
@@ -43,20 +62,59 @@ const EventSchema: Schema = new Schema(
       type: BigInt,
       required: true,
     },
-    liquidator: {
+    vault: {
       type: String,
     },
-    collateralToken: {
+    depositAmount: {
       type: String,
     },
-    collateralAmount: {
-      type: BigInt,
-    },
-    debtToken: {
+    sharesOut: {
       type: String,
     },
-    debtRepaid: {
-      type: BigInt,
+    sharesIn: {
+      type: String,
+    },
+    depositOut: {
+      type: String,
+    },
+    fromIndex: {
+      type: String,
+    },
+    toIndex: {
+      type: String,
+    },
+    moveValue: {
+      type: String,
+    },
+    bought: {
+      type: String,
+    },
+    imbalanceThresholdBps: {
+      type: String,
+    },
+    maxPriceStaleness: {
+      type: String,
+    },
+    eventHeight: {
+      type: String,
+    },
+    etfNonce: {
+      type: String,
+    },
+    etfHeight: {
+      type: String,
+    },
+    shareToken: {
+      type: String,
+    },
+    depositToken: {
+      type: String,
+    },
+    name: {
+      type: String,
+    },
+    symbol: {
+      type: String,
     },
     blockNumber: {
       type: BigInt,

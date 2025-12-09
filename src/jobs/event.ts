@@ -2,9 +2,11 @@ import { CronJob } from "cron"
 import WalletHolding from "../models/WalletHolding"
 import { ChainId, GET_LOGS_BLOCKS, publicClients } from "../config/web3"
 import Event from "../models/Event"
-import { parseAbi, type PublicClient } from "viem"
+import ETF from "../models/ETF"
+import ObserveEvents from "../models/ObserveEvents"
+import { parseAbi, type PublicClient, encodeFunctionData, decodeFunctionResult, erc20Abi } from "viem"
 import {
-  LENDING_CONTRACT_ADDRS,
+  ETF_CONTRACT_ADDRS,
   SUPPORTED_ASSETS,
   DEFAULT_START_BLOCKS,
 } from "../constants"
@@ -16,11 +18,25 @@ type EventLog = {
     token?: `0x${string}`
     amount?: bigint
     nonce?: bigint
-    liquidator?: `0x${string}`
-    collateralToken?: `0x${string}`
-    collateralAmount?: bigint
-    debtToken?: `0x${string}`
-    debtRepaid?: bigint
+    eventNonce?: bigint
+    eventHeight?: bigint
+    vault?: `0x${string}`
+    depositAmount?: bigint
+    sharesOut?: bigint
+    sharesIn?: bigint
+    depositOut?: bigint
+    fromIndex?: bigint
+    toIndex?: bigint
+    moveValue?: bigint
+    bought?: bigint
+    imbalanceThresholdBps?: bigint
+    maxPriceStaleness?: bigint
+    etfNonce?: bigint
+    etfHeight?: bigint
+    shareToken?: `0x${string}`
+    depositToken?: `0x${string}`
+    name?: string
+    symbol?: string
   }
   blockNumber: bigint
 }
@@ -37,10 +53,10 @@ function getNoncesResearched(lastNonce: bigint, currentEventNonce: bigint): Set<
 }
 
 /**
- * Get lending events from blockchain in order of most likely to be used
+ * Get factory events from blockchain in order of most likely to be used
  * Stops early if all nonces have been found to optimize RPC calls
  */
-async function getLendingEvents(
+async function getFactoryEvents(
   client: PublicClient,
   contractAddress: `0x${string}`,
   fromBlock: bigint,
@@ -51,21 +67,21 @@ async function getLendingEvents(
   const newEvents: EventLog[] = []
   const noncesFound = new Set<bigint>()
 
-  // 1. Deposited events (most frequent)
-  const depositedEvents = (
+  // 1. Deposit events (most frequent)
+  const depositEvents = (
     await client.getLogs({
       address: contractAddress,
       fromBlock,
       toBlock,
       events: parseAbi([
-        "event Deposited(address indexed user, address indexed token, uint256 amount, uint256 nonce)",
+        "event Deposit(address indexed vault, address user, uint256 depositAmount, uint256 sharesOut, uint256 eventNonce, uint256 eventHeight)",
       ]),
     })
-  ).filter((log: any) => (log.args.nonce ?? 0n) > lastNonce)
+  ).filter((log: any) => (log.args.eventNonce ?? 0n) > lastNonce)
 
-  for (const log of depositedEvents) {
+  for (const log of depositEvents) {
     newEvents.push(log as EventLog)
-    const nonce = (log as any).args.nonce ?? 0n
+    const nonce = (log as any).args.eventNonce ?? 0n
     if (nonce > lastNonce && noncesResearched.has(nonce)) {
       noncesFound.add(nonce)
     }
@@ -76,21 +92,21 @@ async function getLendingEvents(
     return newEvents
   }
 
-  // 2. Borrowed events
-  const borrowedEvents = (
+  // 2. Redeem events
+  const redeemEvents = (
     await client.getLogs({
       address: contractAddress,
       fromBlock,
       toBlock,
       events: parseAbi([
-        "event Borrowed(address indexed user, address indexed token, uint256 amount, uint256 nonce)",
+        "event Redeem(address indexed vault, address user, uint256 sharesIn, uint256 depositOut, uint256 eventNonce, uint256 eventHeight)",
       ]),
     })
-  ).filter((log: any) => (log.args.nonce ?? 0n) > lastNonce)
+  ).filter((log: any) => (log.args.eventNonce ?? 0n) > lastNonce)
 
-  for (const log of borrowedEvents) {
+  for (const log of redeemEvents) {
     newEvents.push(log as EventLog)
-    const nonce = (log as any).args.nonce ?? 0n
+    const nonce = (log as any).args.eventNonce ?? 0n
     if (nonce > lastNonce && noncesResearched.has(nonce)) {
       noncesFound.add(nonce)
     }
@@ -101,21 +117,21 @@ async function getLendingEvents(
     return newEvents
   }
 
-  // 3. Withdrawn events
-  const withdrawnEvents = (
+  // 3. ETFCreated events
+  const etfCreatedEvents = (
     await client.getLogs({
       address: contractAddress,
       fromBlock,
       toBlock,
       events: parseAbi([
-        "event Withdrawn(address indexed user, address indexed token, uint256 amount, uint256 nonce)",
+        "event ETFCreated(address indexed vault, uint256 eventNonce, uint256 eventHeight, uint256 etfNonce, uint256 etfHeight, address shareToken, address depositToken, string name, string symbol)",
       ]),
     })
-  ).filter((log: any) => (log.args.nonce ?? 0n) > lastNonce)
+  ).filter((log: any) => (log.args.eventNonce ?? 0n) > lastNonce)
 
-  for (const log of withdrawnEvents) {
+  for (const log of etfCreatedEvents) {
     newEvents.push(log as EventLog)
-    const nonce = (log as any).args.nonce ?? 0n
+    const nonce = (log as any).args.eventNonce ?? 0n
     if (nonce > lastNonce && noncesResearched.has(nonce)) {
       noncesFound.add(nonce)
     }
@@ -126,21 +142,21 @@ async function getLendingEvents(
     return newEvents
   }
 
-  // 4. Repaid events
-  const repaidEvents = (
+  // 4. Rebalance events
+  const rebalanceEvents = (
     await client.getLogs({
       address: contractAddress,
       fromBlock,
       toBlock,
       events: parseAbi([
-        "event Repaid(address indexed user, address indexed token, uint256 amount, uint256 nonce)",
+        "event Rebalance(address indexed vault, uint256 fromIndex, uint256 toIndex, uint256 moveValue, uint256 eventNonce, uint256 eventHeight, uint256 bought)",
       ]),
     })
-  ).filter((log: any) => (log.args.nonce ?? 0n) > lastNonce)
+  ).filter((log: any) => (log.args.eventNonce ?? 0n) > lastNonce)
 
-  for (const log of repaidEvents) {
+  for (const log of rebalanceEvents) {
     newEvents.push(log as EventLog)
-    const nonce = (log as any).args.nonce ?? 0n
+    const nonce = (log as any).args.eventNonce ?? 0n
     if (nonce > lastNonce && noncesResearched.has(nonce)) {
       noncesFound.add(nonce)
     }
@@ -151,19 +167,19 @@ async function getLendingEvents(
     return newEvents
   }
 
-  // 5. Liquidated events (least frequent)
-  const liquidatedEvents = (
+  // 5. ParamsUpdated events
+  const paramsUpdatedEvents = (
     await client.getLogs({
       address: contractAddress,
       fromBlock,
       toBlock,
       events: parseAbi([
-        "event Liquidated(address indexed liquidator, address indexed user, address indexed collateralToken, uint256 collateralAmount, address debtToken, uint256 debtRepaid, uint256 nonce)",
+        "event ParamsUpdated(address indexed vault, uint256 imbalanceThresholdBps, uint256 maxPriceStaleness, uint256 eventNonce, uint256 eventHeight)",
       ]),
     })
-  ).filter((log: any) => (log.args.nonce ?? 0n) > lastNonce)
+  ).filter((log: any) => (log.args.eventNonce ?? 0n) > lastNonce)
 
-  for (const log of liquidatedEvents) {
+  for (const log of paramsUpdatedEvents) {
     newEvents.push(log as EventLog)
   }
 
@@ -171,24 +187,245 @@ async function getLendingEvents(
 }
 
 /**
+ * Fetch vault configuration from blockchain
+ */
+async function fetchVaultConfig(
+  client: PublicClient,
+  vaultAddress: `0x${string}`
+): Promise<{
+  factory: string
+  depositToken: string
+  depositFeed: string
+  router: string
+  shareToken: string
+  assets: Array<{
+    token: string
+    feed: string
+    targetWeightBps: number
+    depositPath: string[]
+    withdrawPath: string[]
+    symbol?: string
+    decimals?: number
+  }>
+  imbalanceThresholdBps: bigint
+  maxPriceStaleness: bigint
+  depositSymbol: string
+  depositDecimals: number
+  shareDecimals: number
+}> {
+  const vaultAbi = parseAbi([
+    "function factory() view returns (address)",
+    "function depositToken() view returns (address)",
+    "function depositFeed() view returns (address)",
+    "function router() view returns (address)",
+    "function shareToken() view returns (address)",
+    "function assetCount() view returns (uint256)",
+    "function imbalanceThresholdBps() view returns (uint256)",
+    "function maxPriceStaleness() view returns (uint256)",
+  ])
+
+  const [factory, depositToken, depositFeed, router, shareToken, assetsLength, imbalanceThresholdBps, maxPriceStaleness] =
+    await Promise.all([
+      client.readContract({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: "factory",
+      }),
+      client.readContract({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: "depositToken",
+      }),
+      client.readContract({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: "depositFeed",
+      }),
+      client.readContract({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: "router",
+      }),
+      client.readContract({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: "shareToken",
+      }),
+      client.readContract({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: "assetCount",
+      }),
+      client.readContract({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: "imbalanceThresholdBps",
+      }),
+      client.readContract({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: "maxPriceStaleness",
+      }),
+    ])
+
+  const raw = await client.call({
+    to: vaultAddress,
+    data: encodeFunctionData({
+      abi: [
+        {
+          type: "function",
+          name: "getAssets",
+          inputs: [],
+          outputs: [
+            {
+              type: "tuple[]",
+              components: [
+                { name: "token", type: "address" },
+                { name: "feed", type: "address" },
+                { name: "targetWeightBps", type: "uint256" }, // <— uint256 pour decode
+                { name: "depositPath", type: "address[]" },
+                { name: "withdrawPath", type: "address[]" },
+              ]
+            }
+          ],
+          stateMutability: "view",
+        }
+      ],
+      functionName: "getAssets",
+      args: [],
+    }),
+  })
+
+  if (!raw.data) {
+    throw new Error("No data returned")
+  }
+
+  const assetsResults = decodeFunctionResult({
+    abi: [
+      {
+        type: "function",
+        name: "getAssets",
+        inputs: [],
+        outputs: [
+          { type: "tuple[]", components: [
+            { name: "token", type: "address" },
+            { name: "feed", type: "address" },
+            { name: "targetWeightBps", type: "uint256" },
+            { name: "depositPath", type: "address[]" },
+            { name: "withdrawPath", type: "address[]" },
+          ] }
+        ],
+        stateMutability: "view",
+      }
+    ],
+    data: raw.data,
+  })
+  
+  const assets = assetsResults.map((asset: any) => ({
+    token: asset.token as string,
+    feed: asset.feed as string,
+    targetWeightBps: Number(asset.targetWeightBps),
+    depositPath: asset.depositPath as string[],
+    withdrawPath: asset.withdrawPath as string[],
+  }))
+
+  // Fetch symbol and decimals for each asset token
+  const assetDetailsPromises = assets.map(async (asset) => {
+    try {
+      const [symbol, decimals] = await Promise.all([
+        client.readContract({
+          address: asset.token as `0x${string}`,
+          abi: erc20Abi,
+          functionName: "symbol",
+        }),
+        client.readContract({
+          address: asset.token as `0x${string}`,
+          abi: erc20Abi,
+          functionName: "decimals",
+        }),
+      ])
+      return {
+        ...asset,
+        symbol: symbol as string,
+        decimals: Number(decimals),
+      }
+    } catch (error) {
+      console.error(`Error fetching token details for ${asset.token}:`, error)
+      // Return asset without symbol/decimals if fetch fails
+      return asset
+    }
+  })
+
+  const assetsWithDetails = await Promise.all(assetDetailsPromises)
+
+  // Fetch symbol and decimals for depositToken
+  let depositSymbol = ""
+  let depositDecimals = 0
+  try {
+    const [symbol, decimals] = await Promise.all([
+      client.readContract({
+        address: depositToken as `0x${string}`,
+        abi: erc20Abi,
+        functionName: "symbol",
+      }),
+      client.readContract({
+        address: depositToken as `0x${string}`,
+        abi: erc20Abi,
+        functionName: "decimals",
+      }),
+    ])
+    depositSymbol = symbol as string
+    depositDecimals = Number(decimals)
+  } catch (error) {
+    console.error(`Error fetching depositToken details for ${depositToken}:`, error)
+  }
+
+  // Fetch decimals for shareToken
+  let shareDecimals = 18 // Default to 18
+  try {
+    const decimals = await client.readContract({
+      address: shareToken as `0x${string}`,
+      abi: erc20Abi,
+      functionName: "decimals",
+    })
+    shareDecimals = Number(decimals)
+  } catch (error) {
+    console.error(`Error fetching shareToken decimals for ${shareToken}:`, error)
+  }
+
+  return {
+    factory: factory as string,
+    depositToken: depositToken as string,
+    depositFeed: depositFeed as string,
+    router: router as string,
+    shareToken: shareToken as string,
+    assets: assetsWithDetails,
+    imbalanceThresholdBps: imbalanceThresholdBps as bigint,
+    maxPriceStaleness: maxPriceStaleness as bigint,
+    depositSymbol,
+    depositDecimals,
+    shareDecimals,
+  }
+}
+
+/**
  * Process events and update wallet holdings in memory
  */
-function processEvents(
+async function processEvents(
   events: EventLog[],
   chainId: ChainId,
-  holdingsMap: Map<string, InstanceType<typeof WalletHolding>>
-): void {
+  client: PublicClient,
+  holdingsMap: Map<string, InstanceType<typeof WalletHolding>>,
+  etfsMap: Map<string, InstanceType<typeof ETF>>
+): Promise<void> {
   for (const log of events) {
-    if (log.eventName === "Deposited") {
-      const { user, token, amount } = log.args
+    if (log.eventName === "Deposit") {
+      const { vault, user, depositAmount, sharesOut } = log.args
 
-      const asset = SUPPORTED_ASSETS[chainId].find(
-        (item) => item.address.toLowerCase() === token?.toLowerCase()
-      )
-      if (!asset || !token) continue
+      if (!vault || !user) continue
 
-      const userLower = user?.toLowerCase()
-      if (!userLower) continue
+      const userLower = user.toLowerCase()
+      const vaultLower = vault.toLowerCase()
 
       let walletHolding = holdingsMap.get(userLower)
       if (!walletHolding) {
@@ -201,27 +438,32 @@ function processEvents(
         holdingsMap.set(userLower, walletHolding)
       }
 
+      // Store deposit using vault address as symbol
       const depositIndex = walletHolding.deposits.findIndex(
         (deposit) =>
           deposit.chain === Number(chainId) &&
-          deposit.symbol.toLowerCase() === token.toLowerCase()
+          deposit.symbol.toLowerCase() === vaultLower
       )
       if (depositIndex !== -1) {
-        walletHolding.deposits[depositIndex].amount =
-          walletHolding.deposits[depositIndex].amount + (amount ?? 0n)
+        const currentAmount = BigInt(walletHolding.deposits[depositIndex].amount?.toString() ?? "0")
+        walletHolding.deposits[depositIndex].amount = currentAmount + (sharesOut ?? 0n)
+        walletHolding.markModified("deposits")
       } else {
         walletHolding.deposits.push({
           chain: Number(chainId),
-          symbol: token,
-          amount: amount ?? 0n,
+          symbol: vault,
+          amount: sharesOut ?? 0n,
         })
+        walletHolding.markModified("deposits")
       }
-    } else if (log.eventName === "Withdrawn") {
-      const { user, token, amount } = log.args
-      if (!token) continue
+      console.log("Deposit:", user, vault, depositAmount, sharesOut)
+    } else if (log.eventName === "Redeem") {
+      const { vault, user, sharesIn, depositOut } = log.args
 
-      const userLower = user?.toLowerCase()
-      if (!userLower) continue
+      if (!vault || !user) continue
+
+      const userLower = user.toLowerCase()
+      const vaultLower = vault.toLowerCase()
 
       let walletHolding = holdingsMap.get(userLower)
       if (!walletHolding) {
@@ -234,145 +476,246 @@ function processEvents(
         holdingsMap.set(userLower, walletHolding)
       }
 
+      // Remove shares from deposit using vault address as symbol
       const depositIndex = walletHolding.deposits.findIndex(
         (deposit) =>
           deposit.chain === Number(chainId) &&
-          deposit.symbol.toLowerCase() === token.toLowerCase()
+          deposit.symbol.toLowerCase() === vaultLower
       )
       if (depositIndex !== -1) {
-        walletHolding.deposits[depositIndex].amount =
-          walletHolding.deposits[depositIndex].amount - (amount ?? 0n)
+        const currentAmount = BigInt(walletHolding.deposits[depositIndex].amount?.toString() ?? "0")
+        walletHolding.deposits[depositIndex].amount = currentAmount - (sharesIn ?? 0n)
+        walletHolding.markModified("deposits")
       } else {
         walletHolding.deposits.push({
           chain: Number(chainId),
-          symbol: token,
-          amount: 0n - (amount ?? 0n),
+          symbol: vault,
+          amount: 0n - (sharesIn ?? 0n),
         })
+        walletHolding.markModified("deposits")
       }
-    } else if (log.eventName === "Borrowed") {
-      const { user, token, amount } = log.args
-      if (!token) continue
-
-      const userLower = user?.toLowerCase()
-      if (!userLower) continue
-
-      let walletHolding = holdingsMap.get(userLower)
-      if (!walletHolding) {
-        walletHolding = new WalletHolding({
-          wallet: user,
-          deposits: [],
-          borrows: [],
-          rewards: [],
-        })
-        holdingsMap.set(userLower, walletHolding)
-      }
-
-      const borrowIndex = walletHolding.borrows.findIndex(
-        (borrow) =>
-          borrow.chain === Number(chainId) &&
-          borrow.symbol.toLowerCase() === token.toLowerCase()
-      )
-      if (borrowIndex !== -1) {
-        walletHolding.borrows[borrowIndex].amount =
-          walletHolding.borrows[borrowIndex].amount + (amount ?? 0n)
-      } else {
-        walletHolding.borrows.push({
-          chain: Number(chainId),
-          symbol: token,
-          amount: amount ?? 0n,
-        })
-      }
-    } else if (log.eventName === "Repaid") {
-      const { user, token, amount } = log.args
-      if (!token) continue
-
-      const userLower = user?.toLowerCase()
-      if (!userLower) continue
-
-      let walletHolding = holdingsMap.get(userLower)
-      if (!walletHolding) {
-        walletHolding = new WalletHolding({
-          wallet: user,
-          deposits: [],
-          borrows: [],
-          rewards: [],
-        })
-        holdingsMap.set(userLower, walletHolding)
-      }
-
-      const borrowIndex = walletHolding.borrows.findIndex(
-        (borrow) =>
-          borrow.chain === Number(chainId) &&
-          borrow.symbol.toLowerCase() === token.toLowerCase()
-      )
-      if (borrowIndex !== -1) {
-        walletHolding.borrows[borrowIndex].amount =
-          walletHolding.borrows[borrowIndex].amount - (amount ?? 0n)
-      } else {
-        walletHolding.borrows.push({
-          chain: Number(chainId),
-          symbol: token,
-          amount: 0n - (amount ?? 0n),
-        })
-      }
-    } else if (log.eventName === "Liquidated") {
+      console.log("Redeem:", user, vault, sharesIn, depositOut)
+    } else if (log.eventName === "ETFCreated") {
       const {
-        user,
-        collateralToken,
-        collateralAmount,
-        debtToken,
-        debtRepaid,
+        vault,
+        eventNonce,
+        eventHeight,
+        etfNonce,
+        etfHeight,
+        shareToken,
+        depositToken,
+        name,
+        symbol,
       } = log.args
-      if (!collateralToken || !debtToken) continue
 
-      const userLower = user?.toLowerCase()
-      if (!userLower) continue
+      if (!vault) continue
 
-      let walletHolding = holdingsMap.get(userLower)
-      if (!walletHolding) {
-        walletHolding = new WalletHolding({
-          wallet: user,
-          deposits: [],
-          borrows: [],
-          rewards: [],
-        })
-        holdingsMap.set(userLower, walletHolding)
-      }
+      const vaultLower = vault.toLowerCase()
 
-      const borrowIndex = walletHolding.borrows.findIndex(
-        (borrow) =>
-          borrow.chain === Number(chainId) &&
-          borrow.symbol.toLowerCase() === debtToken.toLowerCase()
-      )
-      if (borrowIndex !== -1) {
-        walletHolding.borrows[borrowIndex].amount =
-          walletHolding.borrows[borrowIndex].amount - (debtRepaid ?? 0n)
-      } else {
-        walletHolding.borrows.push({
+      try {
+        // Fetch vault configuration from blockchain
+        const vaultConfig = await fetchVaultConfig(client, vault)
+
+        // Create new ETF entry with vault configuration
+        const etf = new ETF({
+          vault: vault,
           chain: Number(chainId),
-          symbol: debtToken,
-          amount: 0n - (debtRepaid ?? 0n),
+          shareToken: vaultConfig.shareToken,
+          depositToken: vaultConfig.depositToken,
+          name: name ?? "",
+          symbol: symbol ?? "",
+          tvl: "0",
+          eventNonce: eventNonce ?? 0n,
+          eventHeight: eventHeight ?? 0n,
+          etfNonce: etfNonce ?? 0n,
+          etfHeight: etfHeight ?? 0n,
+          factory: vaultConfig.factory,
+          depositFeed: vaultConfig.depositFeed,
+          router: vaultConfig.router,
+          assets: vaultConfig.assets,
+          imbalanceThresholdBps: vaultConfig.imbalanceThresholdBps,
+          maxPriceStaleness: vaultConfig.maxPriceStaleness,
+          depositSymbol: vaultConfig.depositSymbol,
+          depositDecimals: vaultConfig.depositDecimals,
+          shareDecimals: vaultConfig.shareDecimals,
         })
-      }
 
-      const depositIndex = walletHolding.deposits.findIndex(
-        (deposit) =>
-          deposit.chain === Number(chainId) &&
-          deposit.symbol.toLowerCase() === collateralToken.toLowerCase()
-      )
-      if (depositIndex !== -1) {
-        walletHolding.deposits[depositIndex].amount =
-          walletHolding.deposits[depositIndex].amount -
-          (collateralAmount ?? 0n)
-      } else {
-        walletHolding.deposits.push({
+        etfsMap.set(vaultLower, etf)
+        console.log("ETF created:", vault, name, symbol)
+      } catch (error) {
+        console.error(`Error fetching vault config for ${vault}:`, error)
+        // Still create ETF entry with basic info from event
+        const etf = new ETF({
+          vault: vault,
           chain: Number(chainId),
-          symbol: collateralToken,
-          amount: 0n - (collateralAmount ?? 0n),
+          shareToken: shareToken ?? "",
+          depositToken: depositToken ?? "",
+          name: name ?? "",
+          symbol: symbol ?? "",
+          tvl: "0",
+          eventNonce: eventNonce ?? 0n,
+          eventHeight: eventHeight ?? 0n,
+          etfNonce: etfNonce ?? 0n,
+          etfHeight: etfHeight ?? 0n,
         })
+        etfsMap.set(vaultLower, etf)
       }
+    } else if (log.eventName === "Rebalance") {
+      const { vault } = log.args
+
+      if (!vault) continue
+
+      // TODO: save liquidity tvl on the etf
+    } else if (log.eventName === "ParamsUpdated") {
+      const { vault } = log.args
+
+      if (!vault) continue
+
+      // TODO: handle params update
     }
   }
+}
+
+/**
+ * Convert BigInt to string with decimals rounding
+ */
+function formatTokenAmount(amount: bigint | undefined, decimals: number): string | undefined {
+  if (amount === undefined || amount === null) return undefined
+  if (decimals === 0) return amount.toString()
+  
+  const divisor = BigInt(10 ** decimals)
+  const wholePart = amount / divisor
+  const fractionalPart = amount % divisor
+  
+  if (fractionalPart === 0n) {
+    return wholePart.toString()
+  }
+  
+  // Convert fractional part to decimal string with leading zeros
+  const fractionalStr = fractionalPart.toString().padStart(decimals, '0')
+  // Remove trailing zeros
+  const trimmedFractional = fractionalStr.replace(/0+$/, '')
+  
+  if (trimmedFractional === '') {
+    return wholePart.toString()
+  }
+  
+  return `${wholePart}.${trimmedFractional}`
+}
+
+/**
+ * Format BigInt value with 18 decimals (for USD values)
+ */
+function formatUSDValue(value: bigint): string {
+  return formatTokenAmount(value, 18) ?? "0"
+}
+
+/**
+ * Fetch portfolio value and NAV from vault contract
+ */
+async function fetchVaultPortfolio(
+  client: PublicClient,
+  vaultAddress: `0x${string}`
+): Promise<{
+  totalValue: string
+  valuesPerAsset: string[]
+  nav: string
+}> {
+  const vaultAbi = parseAbi([
+    "function getPortfolioValue() view returns (uint256 totalValue, uint256[] valuesPerAsset)",
+    "function getNAV() view returns (uint256 nav)",
+  ])
+
+  const [portfolioResult, nav] = await Promise.all([
+    client.readContract({
+      address: vaultAddress,
+      abi: vaultAbi,
+      functionName: "getPortfolioValue",
+    }),
+    client.readContract({
+      address: vaultAddress,
+      abi: vaultAbi,
+      functionName: "getNAV",
+    }),
+  ])
+
+  const totalValue = portfolioResult[0] as bigint
+  const valuesPerAsset = portfolioResult[1] as bigint[]
+
+  return {
+    totalValue: formatUSDValue(totalValue),
+    valuesPerAsset: valuesPerAsset.map((value) => formatUSDValue(value)),
+    nav: formatUSDValue(nav),
+  }
+}
+
+/**
+ * Update ETF portfolio values if not updated in the last minute
+ */
+async function updateETFPortfolio(
+  chainId: ChainId,
+  client: PublicClient,
+  vaultAddresses: Set<string>
+): Promise<void> {
+  if (vaultAddresses.size === 0) return
+
+  const oneMinuteAgo = new Date(Date.now() - 60 * 1000)
+
+  // Find ETFs that need updating (not updated in the last minute)
+  const etfsToUpdate = await ETF.find({
+    vault: { $in: Array.from(vaultAddresses) },
+    $or: [
+      { updatedAt: { $lt: oneMinuteAgo } },
+      { updatedAt: { $exists: false } },
+    ],
+  })
+
+  if (etfsToUpdate.length === 0) {
+    console.log("No ETFs to update")
+    return
+  }
+
+  // Update each ETF
+  const updatePromises = etfsToUpdate.map(async (etf) => {
+    try {
+      const portfolio = await fetchVaultPortfolio(
+        client,
+        etf.vault as `0x${string}`
+      )
+
+      console.log("Portfolio:", portfolio)
+
+      // Update assets with their TVL values
+      const updatedAssets = etf.assets?.map((asset, index) => ({
+        token: asset.token,
+        feed: asset.feed,
+        targetWeightBps: asset.targetWeightBps,
+        depositPath: asset.depositPath || [],
+        withdrawPath: asset.withdrawPath || [],
+        symbol: asset.symbol,
+        decimals: asset.decimals,
+        tvl: portfolio.valuesPerAsset[index] ?? "0",
+      })) ?? []
+
+      // Update ETF
+      await ETF.updateOne(
+        { _id: etf._id },
+        {
+          $set: {
+            tvl: portfolio.totalValue,
+            sharePrice: portfolio.nav,
+            assets: updatedAssets,
+          },
+        }
+      )
+
+      console.log(`Updated portfolio for ETF ${etf.vault}: TVL=${portfolio.totalValue}, NAV=${portfolio.nav}`)
+    } catch (error) {
+      console.error(`Error updating portfolio for ETF ${etf.vault}:`, error)
+    }
+  })
+
+  await Promise.all(updatePromises)
 }
 
 /**
@@ -382,20 +725,33 @@ async function saveEventsAndHoldings(
   events: EventLog[],
   chainId: ChainId,
   holdingsMap: Map<string, InstanceType<typeof WalletHolding>>,
-  existingWalletSet: Set<string>
+  existingWalletSet: Set<string>,
+  etfsMap: Map<string, InstanceType<typeof ETF>>
 ): Promise<void> {
   // Build bulk operations for wallet holdings
   const bulkOps: any[] = []
   for (const [walletLower, walletHolding] of holdingsMap.entries()) {
     if (existingWalletSet.has(walletLower)) {
-      // Update existing
+      // Update existing - ensure deposits and borrows have valid amount values
+      const deposits = (walletHolding.deposits || []).map((deposit: any) => ({
+        chain: deposit.chain,
+        symbol: deposit.symbol,
+        amount: deposit.amount ?? 0n,
+      }))
+      
+      const borrows = (walletHolding.borrows || []).map((borrow: any) => ({
+        chain: borrow.chain,
+        symbol: borrow.symbol,
+        amount: borrow.amount ?? 0n,
+      }))
+      
       bulkOps.push({
         updateOne: {
           filter: { _id: walletHolding._id },
           update: {
             $set: {
-              deposits: walletHolding.deposits,
-              borrows: walletHolding.borrows,
+              deposits,
+              borrows,
             },
           },
         },
@@ -405,14 +761,28 @@ async function saveEventsAndHoldings(
       const doc = walletHolding.toObject
         ? walletHolding.toObject()
         : walletHolding
+      
+      // Ensure deposits and borrows have valid amount values
+      const deposits = (doc.deposits || []).map((deposit: any) => ({
+        chain: deposit.chain,
+        symbol: deposit.symbol,
+        amount: deposit.amount ?? 0n,
+      }))
+      
+      const borrows = (doc.borrows || []).map((borrow: any) => ({
+        chain: borrow.chain,
+        symbol: borrow.symbol,
+        amount: borrow.amount ?? 0n,
+      }))
+      
       bulkOps.push({
         insertOne: {
           document: {
             wallet: doc.wallet,
-            deposits: doc.deposits || [],
-            borrows: doc.borrows || [],
+            deposits,
+            borrows,
             rewards: [],
-            tvl: 0,
+            tvl: "0",
             apy: 0,
           },
         },
@@ -425,22 +795,149 @@ async function saveEventsAndHoldings(
     await WalletHolding.bulkWrite(bulkOps)
   }
 
+  // Build bulk operations for ETFs
+  const etfBulkOps: any[] = []
+  const existingVaults = await ETF.find({
+    vault: { $in: Array.from(etfsMap.keys()) },
+  })
+  const existingVaultSet = new Set<string>()
+  for (const etf of existingVaults) {
+    existingVaultSet.add(etf.vault.toLowerCase())
+  }
+
+  for (const [vaultLower, etf] of etfsMap.entries()) {
+    if (existingVaultSet.has(vaultLower)) {
+      // Update existing ETF
+      const existingEtf = existingVaults.find(
+        (e) => e.vault.toLowerCase() === vaultLower
+      )
+      if (existingEtf) {
+        const doc = etf.toObject ? etf.toObject() : etf
+        etfBulkOps.push({
+          updateOne: {
+            filter: { _id: existingEtf._id },
+            update: {
+              $set: {
+                shareToken: doc.shareToken,
+                depositToken: doc.depositToken,
+                name: doc.name,
+                symbol: doc.symbol,
+                eventNonce: doc.eventNonce,
+                eventHeight: doc.eventHeight,
+                etfNonce: doc.etfNonce,
+                etfHeight: doc.etfHeight,
+                factory: doc.factory,
+                depositFeed: doc.depositFeed,
+                router: doc.router,
+                assets: doc.assets || [],
+                imbalanceThresholdBps: doc.imbalanceThresholdBps,
+                maxPriceStaleness: doc.maxPriceStaleness,
+                depositSymbol: doc.depositSymbol,
+                depositDecimals: doc.depositDecimals,
+                shareDecimals: doc.shareDecimals,
+              },
+            },
+          },
+        })
+      }
+    } else {
+      // Insert new ETF
+      const doc = etf.toObject ? etf.toObject() : etf
+      etfBulkOps.push({
+        insertOne: {
+          document: {
+            vault: doc.vault,
+            chain: doc.chain,
+            shareToken: doc.shareToken,
+            depositToken: doc.depositToken,
+            name: doc.name,
+            symbol: doc.symbol,
+            tvl: doc.tvl || "0",
+            eventNonce: doc.eventNonce,
+            eventHeight: doc.eventHeight,
+            etfNonce: doc.etfNonce,
+            etfHeight: doc.etfHeight,
+            factory: doc.factory,
+            depositFeed: doc.depositFeed,
+            router: doc.router,
+            assets: doc.assets || [],
+            imbalanceThresholdBps: doc.imbalanceThresholdBps,
+            maxPriceStaleness: doc.maxPriceStaleness,
+            depositSymbol: doc.depositSymbol,
+            depositDecimals: doc.depositDecimals,
+            shareDecimals: doc.shareDecimals,
+          },
+        },
+      })
+    }
+  }
+
+  // Execute bulk write for ETFs
+  if (etfBulkOps.length > 0) {
+    await ETF.bulkWrite(etfBulkOps)
+  }
+
+  // Get all vault addresses from events to fetch ETF decimals
+  const vaultAddresses = new Set<string>()
+  for (const log of events) {
+    if (log.args.vault) {
+      vaultAddresses.add(log.args.vault.toLowerCase())
+    }
+  }
+
+  // Fetch ETFs to get decimals for formatting (already stored from ETFCreated events)
+  const etfs = await ETF.find({
+    vault: { $in: Array.from(vaultAddresses) },
+  })
+  const etfMap = new Map<string, InstanceType<typeof ETF>>()
+  for (const etf of etfs) {
+    etfMap.set(etf.vault.toLowerCase(), etf)
+  }
+
   // Save events
   await Event.insertMany(
-    events.map((log) => ({
-      type: log.eventName,
-      chain: Number(chainId),
-      user: log.args.user as string,
-      token: log.args.token ?? undefined,
-      amount: log.args.amount ?? undefined,
-      nonce: log.args.nonce ?? 0n,
-      blockNumber: log.blockNumber,
-      liquidator: log.args.liquidator ?? undefined,
-      collateralToken: log.args.collateralToken ?? undefined,
-      collateralAmount: log.args.collateralAmount ?? undefined,
-      debtToken: log.args.debtToken ?? undefined,
-      debtRepaid: log.args.debtRepaid ?? undefined,
-    }))
+    events.map((log) => {
+      const vaultLower = log.args.vault?.toLowerCase()
+      const etf = vaultLower ? etfMap.get(vaultLower) : undefined
+      const depositDecimals = etf?.depositDecimals ?? 18
+      const shareTokenDecimals = etf?.shareDecimals ?? 18
+
+      return {
+        type: log.eventName,
+        chain: Number(chainId),
+        user: log.args.user ?? undefined,
+        token: log.args.token ?? undefined,
+        amount: log.args.amount ? formatTokenAmount(log.args.amount, 18) : undefined,
+        nonce: log.args.eventNonce ?? log.args.nonce ?? 0n,
+        blockNumber: log.blockNumber,
+        vault: log.args.vault ?? undefined,
+        depositAmount: log.args.depositAmount
+          ? formatTokenAmount(log.args.depositAmount, depositDecimals)
+          : undefined,
+        sharesOut: log.args.sharesOut
+          ? formatTokenAmount(log.args.sharesOut, shareTokenDecimals)
+          : undefined,
+        sharesIn: log.args.sharesIn
+          ? formatTokenAmount(log.args.sharesIn, shareTokenDecimals)
+          : undefined,
+        depositOut: log.args.depositOut
+          ? formatTokenAmount(log.args.depositOut, depositDecimals)
+          : undefined,
+        fromIndex: log.args.fromIndex?.toString(),
+        toIndex: log.args.toIndex?.toString(),
+        moveValue: log.args.moveValue ? formatTokenAmount(log.args.moveValue, 18) : undefined,
+        bought: log.args.bought ? formatTokenAmount(log.args.bought, 18) : undefined,
+        imbalanceThresholdBps: log.args.imbalanceThresholdBps?.toString(),
+        maxPriceStaleness: log.args.maxPriceStaleness?.toString(),
+        eventHeight: log.args.eventHeight?.toString(),
+        etfNonce: log.args.etfNonce?.toString(),
+        etfHeight: log.args.etfHeight?.toString(),
+        shareToken: log.args.shareToken ?? undefined,
+        depositToken: log.args.depositToken ?? undefined,
+        name: log.args.name ?? undefined,
+        symbol: log.args.symbol ?? undefined,
+      }
+    })
   )
 }
 
@@ -448,32 +945,72 @@ async function saveEventsAndHoldings(
  * Observe and process lending events for a specific chain
  */
 async function observeEvents(chainId: ChainId, client: PublicClient): Promise<void> {
+  if (DEFAULT_START_BLOCKS[chainId] == 0n) return
+
+  // Get or create observe progress for this chain
+  let observeProgress = await ObserveEvents.findOne({ chain: Number(chainId) })
+  
+  // Get last event for nonce tracking
   const lastEvent = await Event.findOne({
     chain: Number(chainId),
   }).sort({ blockNumber: -1, nonce: -1 })
 
-  const lastBlockNumber =
-    lastEvent?.blockNumber ??
-    DEFAULT_START_BLOCKS[chainId]
+  // Determine starting block number
+  let fromBlock: bigint
+  if (observeProgress) {
+    // Use saved progress (toBlock from last run becomes fromBlock)
+    fromBlock = observeProgress.lastBlockNumber
+  } else {
+    // First time: use last event block or default start block
+    fromBlock = lastEvent?.blockNumber ?? DEFAULT_START_BLOCKS[chainId]
+  }
+
   const lastNonce = lastEvent?.nonce ?? 0n
 
+  // Get latest block number to avoid going beyond the chain
+  const latestBlock = await client.getBlockNumber()
+
   const currentEventNonce = await client.readContract({
-    address: LENDING_CONTRACT_ADDRS[chainId] as `0x${string}`,
-    abi: parseAbi(["function lastEventNonce() view returns (uint256)"]),
-    functionName: "lastEventNonce",
+    address: ETF_CONTRACT_ADDRS[chainId] as `0x${string}`,
+    abi: parseAbi(["function state_lastEventNonce() view returns (uint256)"]),
+    functionName: "state_lastEventNonce",
   })
 
-  if (currentEventNonce <= lastNonce) return
+  // Calculate toBlock but don't exceed latest block
+  const calculatedToBlock = fromBlock + GET_LOGS_BLOCKS[chainId]
+  const toBlock = calculatedToBlock > latestBlock ? latestBlock : calculatedToBlock
+
+  // If we're already at the latest block, don't process
+  if (fromBlock >= latestBlock) {
+    console.log(
+      `Chain ${chainId} already at latest block ${latestBlock}, fromBlock: ${fromBlock}`
+    )
+    return
+  }
+
+  if (currentEventNonce <= lastNonce) {
+    console.log("No new events to process for chain", chainId, "range", fromBlock, toBlock)
+    // Still save progress even if no new events, but don't exceed latest block
+    const savedToBlock = toBlock >= latestBlock ? latestBlock : toBlock
+    await ObserveEvents.findOneAndUpdate(
+      { chain: Number(chainId) },
+      {
+        chain: Number(chainId),
+        lastBlockNumber: savedToBlock,
+        lastNonce: lastNonce,
+      },
+      { upsert: true }
+    )
+    return
+  }
 
   // Get all nonces between lastNonce and currentEventNonce to optimize RPC calls
   const noncesResearched = getNoncesResearched(lastNonce, currentEventNonce)
 
-  const contractAddress = LENDING_CONTRACT_ADDRS[chainId] as `0x${string}`
-  const fromBlock = lastBlockNumber
-  const toBlock = lastBlockNumber + GET_LOGS_BLOCKS[chainId]
+  const contractAddress = ETF_CONTRACT_ADDRS[chainId] as `0x${string}`
 
   // Get events from blockchain
-  const newEvents = await getLendingEvents(
+  const newEvents = await getFactoryEvents(
     client,
     contractAddress,
     fromBlock,
@@ -482,7 +1019,24 @@ async function observeEvents(chainId: ChainId, client: PublicClient): Promise<vo
     noncesResearched
   )
 
-  if (newEvents.length === 0) return
+  if (newEvents.length === 0) {
+    // Save progress even if no events found (to advance the block range)
+    // But don't exceed latest block (reuse latestBlock from above)
+    const savedToBlock = toBlock >= latestBlock ? latestBlock : toBlock
+    await ObserveEvents.findOneAndUpdate(
+      { chain: Number(chainId) },
+      {
+        chain: Number(chainId),
+        lastBlockNumber: savedToBlock,
+        lastNonce: lastNonce,
+      },
+      { upsert: true }
+    )
+    console.log(
+      `No events found for chain ${chainId}, advanced to block ${savedToBlock} (latest: ${latestBlock})`
+    )
+    return
+  }
 
   // Collect all unique wallet addresses
   const walletAddresses = new Set<string>()
@@ -503,11 +1057,50 @@ async function observeEvents(chainId: ChainId, client: PublicClient): Promise<vo
     existingWalletSet.add(walletLower)
   }
 
+  // Create map for ETFs
+  const etfsMap = new Map<string, InstanceType<typeof ETF>>()
+
   // Process all events and update in-memory objects
-  processEvents(newEvents, chainId, holdingsMap)
+  await processEvents(newEvents, chainId, client, holdingsMap, etfsMap)
 
   // Save events and holdings to database
-  await saveEventsAndHoldings(newEvents, chainId, holdingsMap, existingWalletSet)
+  await saveEventsAndHoldings(
+    newEvents,
+    chainId,
+    holdingsMap,
+    existingWalletSet,
+    etfsMap
+  )
+
+  // Collect vault addresses from events for portfolio update
+  const vaultAddressesForUpdate = new Set<string>()
+  for (const log of newEvents) {
+    if (log.args.vault) {
+      vaultAddressesForUpdate.add(log.args.vault)
+    }
+  }
+
+  // Update ETF portfolio values if needed
+  await updateETFPortfolio(chainId, client, vaultAddressesForUpdate)
+
+  // Update progress with final nonce from processed events
+  const finalNonce = newEvents.reduce((max, event) => {
+    const eventNonce = event.args.eventNonce ?? event.args.nonce ?? 0n
+    return eventNonce > max ? eventNonce : max
+  }, lastNonce)
+
+  // Ensure we don't exceed latest block (reuse latestBlock from above)
+  const savedToBlock = toBlock >= latestBlock ? latestBlock : toBlock
+
+  await ObserveEvents.findOneAndUpdate(
+    { chain: Number(chainId) },
+    {
+      chain: Number(chainId),
+      lastBlockNumber: savedToBlock,
+      lastNonce: finalNonce,
+    },
+    { upsert: true }
+  )
 }
 
 // Mutex to prevent concurrent execution of the cron job
