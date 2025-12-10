@@ -3,9 +3,11 @@ import dotenv from "dotenv"
 import { connectDatabase } from "./config/database"
 import rewardsRoutes from "./routes/rewards"
 import etfsRoutes from "./routes/etfs"
+import chainlinkDataFeedsRoutes from "./routes/chainlinkDataFeeds"
 
 import "./jobs/event"
 import "./jobs/reward"
+import "./jobs/chainlink"
 
 // Load environment variables
 dotenv.config()
@@ -61,6 +63,7 @@ app.get("/health", (req: Request, res: Response) => {
 // API routes
 app.use("/api/rewards", rewardsRoutes)
 app.use("/api/etfs", etfsRoutes)
+app.use("/api/chainlinkDataFeeds", chainlinkDataFeedsRoutes)
 
 // 404 handler
 app.use((req: Request, res: Response) => {
