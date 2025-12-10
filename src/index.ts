@@ -4,6 +4,7 @@ import { connectDatabase } from "./config/database"
 import rewardsRoutes from "./routes/rewards"
 import etfsRoutes from "./routes/etfs"
 import chainlinkDataFeedsRoutes from "./routes/chainlinkDataFeeds"
+import leaderBoardRoutes from "./routes/leaderBoard"
 
 import "./jobs/event"
 import "./jobs/reward"
@@ -64,6 +65,7 @@ app.get("/health", (req: Request, res: Response) => {
 app.use("/api/rewards", rewardsRoutes)
 app.use("/api/etfs", etfsRoutes)
 app.use("/api/chainlinkDataFeeds", chainlinkDataFeedsRoutes)
+app.use("/api/leaderBoard", leaderBoardRoutes)
 
 // 404 handler
 app.use((req: Request, res: Response) => {

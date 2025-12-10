@@ -1,7 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose"
 
-export interface IPoolsRewards extends Document {
-  type: string
+export interface ILeaderBoardRewards extends Document {
   chain: number
   symbol: string
   decimals: number
@@ -21,13 +20,8 @@ export interface IPoolsRewards extends Document {
 }
 
 // Reward schema
-const PoolsRewardsSchema: Schema = new Schema(
+const LeaderBoardRewardsSchema: Schema = new Schema(
   {
-    type: {
-      type: String,
-      enum: ["deposit", "borrow"],
-      required: true,
-    },
     chain: {
       type: Number,
       required: true,
@@ -85,4 +79,5 @@ const PoolsRewardsSchema: Schema = new Schema(
   }
 )
 
-export default mongoose.model<IPoolsRewards>("PoolsRewards", PoolsRewardsSchema)
+export default mongoose.model<ILeaderBoardRewards>("LeaderBoardRewards", LeaderBoardRewardsSchema)
+

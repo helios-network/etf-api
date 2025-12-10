@@ -1,5 +1,5 @@
 import { CronJob } from "cron"
-import PoolsRewards from "../models/PoolsRewards"
+import LeaderBoardRewards from "../models/LeaderBoardRewards"
 import WalletHolding from "../models/WalletHolding"
 
 const BATCH_SIZE = 1000 // Number of documents to process per batch
@@ -15,7 +15,7 @@ function getCurrentTime(): number {
  * Get the active pool reward for the given date
  */
 async function getActivePoolReward(currentTime: number) {
-  return await PoolsRewards.findOne({
+  return await LeaderBoardRewards.findOne({
     startDate: { $lte: currentTime },
     endDate: { $gte: currentTime },
   })

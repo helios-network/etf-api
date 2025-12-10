@@ -424,25 +424,24 @@ async function processEvents(
 
       if (!vault || !user) continue
 
-      const userLower = user.toLowerCase()
-      const vaultLower = vault.toLowerCase()
-
-      let walletHolding = holdingsMap.get(userLower)
+      let walletHolding = holdingsMap.get(user)
       if (!walletHolding) {
         walletHolding = new WalletHolding({
           wallet: user,
           deposits: [],
           borrows: [],
           rewards: [],
+          transactionsPerformed: 0,
+          volumeTraded: 0n,
         })
-        holdingsMap.set(userLower, walletHolding)
+        holdingsMap.set(user, walletHolding)
       }
 
       // Store deposit using vault address as symbol
       const depositIndex = walletHolding.deposits.findIndex(
         (deposit) =>
           deposit.chain === Number(chainId) &&
-          deposit.symbol.toLowerCase() === vaultLower
+          deposit.symbol === vault
       )
       if (depositIndex !== -1) {
         const currentAmount = BigInt(walletHolding.deposits[depositIndex].amount?.toString() ?? "0")
@@ -456,24 +455,35 @@ async function processEvents(
         })
         walletHolding.markModified("deposits")
       }
+
+      // Update transactions and volume
+      const currentTransactions = walletHolding.transactionsPerformed ?? 0
+      const currentVolume = BigInt(walletHolding.volumeTraded?.toString() ?? "0")
+      walletHolding.transactionsPerformed = currentTransactions + 1
+      const depositAmountBigInt = depositAmount ? BigInt(depositAmount.toString()) : 0n
+      walletHolding.volumeTraded = currentVolume + depositAmountBigInt
+      walletHolding.markModified("transactionsPerformed")
+      walletHolding.markModified("volumeTraded")
+
       console.log("Deposit:", user, vault, depositAmount, sharesOut)
     } else if (log.eventName === "Redeem") {
       const { vault, user, sharesIn, depositOut } = log.args
 
       if (!vault || !user) continue
 
-      const userLower = user.toLowerCase()
       const vaultLower = vault.toLowerCase()
 
-      let walletHolding = holdingsMap.get(userLower)
+      let walletHolding = holdingsMap.get(user)
       if (!walletHolding) {
         walletHolding = new WalletHolding({
           wallet: user,
           deposits: [],
           borrows: [],
           rewards: [],
+          transactionsPerformed: 0,
+          volumeTraded: 0n,
         })
-        holdingsMap.set(userLower, walletHolding)
+        holdingsMap.set(user, walletHolding)
       }
 
       // Remove shares from deposit using vault address as symbol
@@ -494,6 +504,16 @@ async function processEvents(
         })
         walletHolding.markModified("deposits")
       }
+
+      // Update transactions and volume
+      const currentTransactions = walletHolding.transactionsPerformed ?? 0
+      const currentVolume = BigInt(walletHolding.volumeTraded?.toString() ?? "0")
+      walletHolding.transactionsPerformed = currentTransactions + 1
+      const depositOutBigInt = depositOut ? BigInt(depositOut.toString()) : 0n
+      walletHolding.volumeTraded = currentVolume + depositOutBigInt
+      walletHolding.markModified("transactionsPerformed")
+      walletHolding.markModified("volumeTraded")
+
       console.log("Redeem:", user, vault, sharesIn, depositOut)
     } else if (log.eventName === "ETFCreated") {
       const {
@@ -730,8 +750,8 @@ async function saveEventsAndHoldings(
 ): Promise<void> {
   // Build bulk operations for wallet holdings
   const bulkOps: any[] = []
-  for (const [walletLower, walletHolding] of holdingsMap.entries()) {
-    if (existingWalletSet.has(walletLower)) {
+  for (const [wallet, walletHolding] of holdingsMap.entries()) {
+    if (existingWalletSet.has(wallet)) {
       // Update existing - ensure deposits and borrows have valid amount values
       const deposits = (walletHolding.deposits || []).map((deposit: any) => ({
         chain: deposit.chain,
@@ -745,15 +765,26 @@ async function saveEventsAndHoldings(
         amount: borrow.amount ?? 0n,
       }))
       
+      const updateOp: any = {
+        $set: {
+          deposits,
+          borrows,
+        },
+      }
+
+      // Update transactionsPerformed and volumeTraded if they exist
+      if (walletHolding.transactionsPerformed !== undefined) {
+        updateOp.$set.transactionsPerformed = walletHolding.transactionsPerformed
+      }
+
+      if (walletHolding.volumeTraded !== undefined) {
+        updateOp.$set.volumeTraded = walletHolding.volumeTraded
+      }
+
       bulkOps.push({
         updateOne: {
           filter: { _id: walletHolding._id },
-          update: {
-            $set: {
-              deposits,
-              borrows,
-            },
-          },
+          update: updateOp,
         },
       })
     } else {
@@ -784,6 +815,8 @@ async function saveEventsAndHoldings(
             rewards: [],
             tvl: "0",
             apy: 0,
+            transactionsPerformed: doc.transactionsPerformed || 0,
+            volumeTraded: doc.volumeTraded || 0n,
           },
         },
       })
@@ -1042,7 +1075,7 @@ async function observeEvents(chainId: ChainId, client: PublicClient): Promise<vo
   const walletAddresses = new Set<string>()
   for (const log of newEvents) {
     const user = log.args.user
-    if (user) walletAddresses.add(user.toLowerCase())
+    if (user) walletAddresses.add(user)
   }
 
   // Fetch all existing wallet holdings in one query
@@ -1052,9 +1085,8 @@ async function observeEvents(chainId: ChainId, client: PublicClient): Promise<vo
   const holdingsMap = new Map<string, InstanceType<typeof WalletHolding>>()
   const existingWalletSet = new Set<string>()
   for (const holding of existingHoldings) {
-    const walletLower = holding.wallet.toLowerCase()
-    holdingsMap.set(walletLower, holding)
-    existingWalletSet.add(walletLower)
+    holdingsMap.set(holding.wallet, holding)
+    existingWalletSet.add(holding.wallet)
   }
 
   // Create map for ETFs

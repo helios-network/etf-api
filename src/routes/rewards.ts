@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express"
-import PoolsRewards from "../models/PoolsRewards"
+import LeaderBoardRewards from "../models/LeaderBoardRewards"
 import WalletHolding from "../models/WalletHolding"
 import { privateKeyToAccount } from "viem/accounts"
 import { SUPPORTED_ASSETS } from "../constants"
@@ -13,10 +13,10 @@ let claimQueue: Promise<void> = Promise.resolve()
 
 router.get("/rewards_boost", async (_req: Request, res: Response) => {
   try {
-    const poolsRewards = await PoolsRewards.find()
+    const leaderBoardRewards = await LeaderBoardRewards.find()
     return res.json({
       success: true,
-      data: poolsRewards.reverse(),
+      data: leaderBoardRewards.reverse(),
     })
   } catch (error) {
     return res.status(500).json({

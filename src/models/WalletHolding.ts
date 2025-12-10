@@ -21,6 +21,8 @@ export interface IWalletHolding extends Document {
     date: number
     hash?: string
   }[]
+  transactionsPerformed: number
+  volumeTraded: bigint
   createdAt: Date
   updatedAt: Date
 }
@@ -102,6 +104,14 @@ const WalletHoldingSchema: Schema = new Schema(
         },
       ],
       default: [],
+    },
+    transactionsPerformed: {
+      type: Number,
+      default: 0,
+    },
+    volumeTraded: {
+      type: BigInt,
+      default: 0n,
     },
   },
   {
