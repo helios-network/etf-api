@@ -409,6 +409,198 @@ async function fetchVaultConfig(
 }
 
 /**
+ * Calculate wallet TVL from deposits
+ * TVL = sum of (shares × NAV) for all deposits
+ */
+export async function calculateWalletTVL(
+  deposits: Array<{
+    chain: number
+    symbol: string
+    decimals?: number
+    etfVaultAddress?: string
+    etfTokenAddress?: string
+    amount: bigint
+  }>,
+  etfsMap: Map<string, InstanceType<typeof ETF>>
+): Promise<number> {
+  if (!deposits || deposits.length === 0) {
+    return 0
+  }
+
+  let totalTVL = 0
+
+  // Group deposits by vault address to batch fetch ETFs
+  const vaultAddresses = new Set<string>()
+  for (const deposit of deposits) {
+    const vaultAddress = deposit.etfVaultAddress || deposit.symbol
+    if (vaultAddress && !vaultAddress.startsWith("UNKNOWN_")) {
+      vaultAddresses.add(vaultAddress.toLowerCase())
+    }
+  }
+
+  // Fetch all ETFs at once
+  const etfs = await ETF.find({
+    vault: { $in: Array.from(vaultAddresses) },
+  })
+  const etfDbMap = new Map<string, InstanceType<typeof ETF>>()
+  for (const etf of etfs) {
+    etfDbMap.set(etf.vault.toLowerCase(), etf)
+  }
+
+  // Calculate TVL for each deposit
+  for (const deposit of deposits) {
+    // Skip deposits with zero or negative amount
+    const sharesAmount = BigInt(deposit.amount?.toString() ?? "0")
+    if (sharesAmount <= 0n) {
+      continue
+    }
+
+    const vaultAddress = deposit.etfVaultAddress || deposit.symbol
+    if (!vaultAddress || vaultAddress.startsWith("UNKNOWN_")) {
+      continue
+    }
+
+    // Try to get ETF from in-memory map first, then from database
+    const vaultLower = vaultAddress.toLowerCase()
+    let etf = etfsMap.get(vaultLower) || etfDbMap.get(vaultLower)
+
+    if (!etf) {
+      // ETF not found, skip this deposit
+      continue
+    }
+
+    // Parse sharePrice (stored as formatted string)
+    const sharePriceStr = etf.sharePrice
+    if (!sharePriceStr || sharePriceStr === "0" || sharePriceStr === "0.0" || sharePriceStr.trim() === "") {
+      continue
+    }
+
+    const sharePriceUSD = parseFloat(sharePriceStr)
+    if (isNaN(sharePriceUSD) || sharePriceUSD <= 0) {
+      continue
+    }
+
+    // Get the decimals for the shares
+    const depositDecimals = deposit.decimals ?? etf.shareDecimals ?? 18
+    
+    // Convert shares from raw units to human-readable units
+    const sharesInHumanReadable = Number(sharesAmount) / Math.pow(10, depositDecimals)
+
+    // Calculate value: shares (human-readable) × sharePrice (USD)
+    const depositValueUSD = sharesInHumanReadable * sharePriceUSD
+    totalTVL += depositValueUSD
+  }
+
+  return totalTVL
+}
+
+/**
+ * Recalculate TVL for all wallets and fix deposits metadata
+ * Useful for one-time migration or fixing corrupted data
+ * Note: TVL is automatically calculated on each deposit/redeem event
+ */
+export async function recalculateAllWalletTVL(): Promise<{
+  updated: number
+  errors: number
+}> {
+  let updated = 0
+  let errors = 0
+
+  try {
+    // Get all wallets
+    const wallets = await WalletHolding.find()
+    console.log(`Recalculating TVL for ${wallets.length} wallets...`)
+
+    // Get all ETFs to build a map
+    const allETFs = await ETF.find()
+    const etfMap = new Map<string, InstanceType<typeof ETF>>()
+    for (const etf of allETFs) {
+      etfMap.set(etf.vault.toLowerCase(), etf)
+    }
+
+    // Process wallets in batches
+    const batchSize = 100
+    for (let i = 0; i < wallets.length; i += batchSize) {
+      const batch = wallets.slice(i, i + batchSize)
+      
+      const bulkOps: any[] = []
+      
+      for (const wallet of batch) {
+        try {
+          // Update deposits with proper ETF metadata
+          const updatedDeposits = (wallet.deposits || []).map((deposit: any) => {
+            const vaultAddress = deposit.etfVaultAddress || deposit.symbol
+            if (!vaultAddress || vaultAddress.startsWith("UNKNOWN_")) {
+              return deposit
+            }
+
+            const vaultLower = vaultAddress.toLowerCase()
+            const etf = etfMap.get(vaultLower)
+
+            if (etf) {
+              return {
+                chain: deposit.chain,
+                symbol: etf.symbol,
+                decimals: etf.shareDecimals ?? 18,
+                etfVaultAddress: etf.vault,
+                etfTokenAddress: etf.shareToken,
+                amount: deposit.amount ?? 0n,
+              }
+            } else {
+              const symbol = deposit.symbol?.startsWith("0x") 
+                ? `UNKNOWN_${deposit.symbol.slice(0, 8)}`
+                : deposit.symbol || `UNKNOWN_${vaultAddress.slice(0, 8)}`
+              
+              return {
+                chain: deposit.chain,
+                symbol: symbol,
+                decimals: deposit.decimals ?? 18,
+                etfVaultAddress: deposit.etfVaultAddress || vaultAddress,
+                etfTokenAddress: deposit.etfTokenAddress || "",
+                amount: deposit.amount ?? 0n,
+              }
+            }
+          })
+
+          // Calculate TVL using the updated deposits
+          const emptyEtfsMap = new Map<string, InstanceType<typeof ETF>>()
+          const calculatedTVL = await calculateWalletTVL(updatedDeposits, emptyEtfsMap)
+
+          // Prepare update operation
+          bulkOps.push({
+            updateOne: {
+              filter: { _id: wallet._id },
+              update: {
+                $set: {
+                  deposits: updatedDeposits,
+                  tvl: calculatedTVL,
+                },
+              },
+            },
+          })
+
+          updated++
+        } catch (error) {
+          console.error(`Error processing wallet ${wallet.wallet}:`, error)
+          errors++
+        }
+      }
+
+      // Execute bulk update
+      if (bulkOps.length > 0) {
+        await WalletHolding.bulkWrite(bulkOps)
+      }
+    }
+
+    console.log(`TVL recalculation completed: ${updated} wallets updated, ${errors} errors`)
+    return { updated, errors }
+  } catch (error) {
+    console.error("Error in recalculateAllWalletTVL:", error)
+    throw error
+  }
+}
+
+/**
  * Process events and update wallet holdings in memory
  */
 async function processEvents(
@@ -424,6 +616,8 @@ async function processEvents(
 
       if (!vault || !user) continue
 
+      const vaultLower = vault.toLowerCase()
+
       let walletHolding = holdingsMap.get(user)
       if (!walletHolding) {
         walletHolding = new WalletHolding({
@@ -437,22 +631,70 @@ async function processEvents(
         holdingsMap.set(user, walletHolding)
       }
 
-      // Store deposit using vault address as symbol
+      // Get ETF info from in-memory map or fetch from database
+      let etf = etfsMap.get(vaultLower)
+      if (!etf) {
+        const foundEtf = await ETF.findOne({ vault: { $regex: new RegExp(`^${vault}$`, "i") } })
+        if (foundEtf) {
+          etf = foundEtf
+          etfsMap.set(vaultLower, etf)
+        }
+      }
+
+      // Store deposit with proper ETF metadata
       const depositIndex = walletHolding.deposits.findIndex(
         (deposit) =>
           deposit.chain === Number(chainId) &&
-          deposit.symbol === vault
+          (deposit.etfVaultAddress?.toLowerCase() === vaultLower ||
+           (!deposit.etfVaultAddress && deposit.symbol.toLowerCase() === vaultLower))
       )
+
       if (depositIndex !== -1) {
+        // Update existing deposit
         const currentAmount = BigInt(walletHolding.deposits[depositIndex].amount?.toString() ?? "0")
         walletHolding.deposits[depositIndex].amount = currentAmount + (sharesOut ?? 0n)
+        
+        // Always update metadata if ETF is available (to fix old deposits with wrong symbol)
+        if (etf) {
+          walletHolding.deposits[depositIndex].symbol = etf.symbol // Use real symbol, not vault address
+          walletHolding.deposits[depositIndex].decimals = etf.shareDecimals ?? 18
+          walletHolding.deposits[depositIndex].etfVaultAddress = etf.vault
+          walletHolding.deposits[depositIndex].etfTokenAddress = etf.shareToken
+        }
         walletHolding.markModified("deposits")
       } else {
-        walletHolding.deposits.push({
-          chain: Number(chainId),
-          symbol: vault,
-          amount: sharesOut ?? 0n,
-        })
+        if (etf) {
+          walletHolding.deposits.push({
+            chain: Number(chainId),
+            symbol: etf.symbol,
+            decimals: etf.shareDecimals ?? 18,
+            etfVaultAddress: etf.vault,
+            etfTokenAddress: etf.shareToken,
+            amount: sharesOut ?? 0n,
+          })
+        } else {
+          const retryEtf = await ETF.findOne({ vault: { $regex: new RegExp(`^${vault}$`, "i") } })
+          if (retryEtf) {
+            etfsMap.set(vaultLower, retryEtf)
+            walletHolding.deposits.push({
+              chain: Number(chainId),
+              symbol: retryEtf.symbol,
+              decimals: retryEtf.shareDecimals ?? 18,
+              etfVaultAddress: retryEtf.vault,
+              etfTokenAddress: retryEtf.shareToken,
+              amount: sharesOut ?? 0n,
+            })
+          } else {
+            walletHolding.deposits.push({
+              chain: Number(chainId),
+              symbol: `UNKNOWN_${vault.slice(0, 8)}`,
+              decimals: 18,
+              etfVaultAddress: vault,
+              etfTokenAddress: "",
+              amount: sharesOut ?? 0n,
+            })
+          }
+        }
         walletHolding.markModified("deposits")
       }
 
@@ -465,7 +707,10 @@ async function processEvents(
       walletHolding.markModified("transactionsPerformed")
       walletHolding.markModified("volumeTraded")
 
-      console.log("Deposit:", user, vault, depositAmount, sharesOut)
+      // Calculate and update TVL
+      const calculatedTVL = await calculateWalletTVL(walletHolding.deposits, etfsMap)
+      walletHolding.tvl = calculatedTVL
+      walletHolding.markModified("tvl")
     } else if (log.eventName === "Redeem") {
       const { vault, user, sharesIn, depositOut } = log.args
 
@@ -486,22 +731,69 @@ async function processEvents(
         holdingsMap.set(user, walletHolding)
       }
 
-      // Remove shares from deposit using vault address as symbol
+      // Get ETF info from in-memory map or fetch from database
+      let etf = etfsMap.get(vaultLower)
+      if (!etf) {
+        const foundEtf = await ETF.findOne({ vault: { $regex: new RegExp(`^${vault}$`, "i") } })
+        if (foundEtf) {
+          etf = foundEtf
+          etfsMap.set(vaultLower, etf)
+        }
+      }
+
       const depositIndex = walletHolding.deposits.findIndex(
         (deposit) =>
           deposit.chain === Number(chainId) &&
-          deposit.symbol.toLowerCase() === vaultLower
+          (deposit.etfVaultAddress?.toLowerCase() === vaultLower ||
+           (!deposit.etfVaultAddress && deposit.symbol.toLowerCase() === vaultLower))
       )
+
       if (depositIndex !== -1) {
+        // Update existing deposit
         const currentAmount = BigInt(walletHolding.deposits[depositIndex].amount?.toString() ?? "0")
         walletHolding.deposits[depositIndex].amount = currentAmount - (sharesIn ?? 0n)
+        
+        // Always update metadata if ETF is available (to fix old deposits with wrong symbol)
+        if (etf) {
+          walletHolding.deposits[depositIndex].symbol = etf.symbol // Use real symbol, not vault address
+          walletHolding.deposits[depositIndex].decimals = etf.shareDecimals ?? 18
+          walletHolding.deposits[depositIndex].etfVaultAddress = etf.vault
+          walletHolding.deposits[depositIndex].etfTokenAddress = etf.shareToken
+        }
         walletHolding.markModified("deposits")
       } else {
-        walletHolding.deposits.push({
-          chain: Number(chainId),
-          symbol: vault,
-          amount: 0n - (sharesIn ?? 0n),
-        })
+        if (etf) {
+          walletHolding.deposits.push({
+            chain: Number(chainId),
+            symbol: etf.symbol,
+            decimals: etf.shareDecimals ?? 18,
+            etfVaultAddress: etf.vault,
+            etfTokenAddress: etf.shareToken,
+            amount: 0n - (sharesIn ?? 0n),
+          })
+        } else {
+          const retryEtf = await ETF.findOne({ vault: { $regex: new RegExp(`^${vault}$`, "i") } })
+          if (retryEtf) {
+            etfsMap.set(vaultLower, retryEtf)
+            walletHolding.deposits.push({
+              chain: Number(chainId),
+              symbol: retryEtf.symbol,
+              decimals: retryEtf.shareDecimals ?? 18,
+              etfVaultAddress: retryEtf.vault,
+              etfTokenAddress: retryEtf.shareToken,
+              amount: 0n - (sharesIn ?? 0n),
+            })
+          } else {
+            walletHolding.deposits.push({
+              chain: Number(chainId),
+              symbol: `UNKNOWN_${vault.slice(0, 8)}`,
+              decimals: 18,
+              etfVaultAddress: vault,
+              etfTokenAddress: "",
+              amount: 0n - (sharesIn ?? 0n),
+            })
+          }
+        }
         walletHolding.markModified("deposits")
       }
 
@@ -514,7 +806,10 @@ async function processEvents(
       walletHolding.markModified("transactionsPerformed")
       walletHolding.markModified("volumeTraded")
 
-      console.log("Redeem:", user, vault, sharesIn, depositOut)
+      // Calculate and update TVL
+      const calculatedTVL = await calculateWalletTVL(walletHolding.deposits, etfsMap)
+      walletHolding.tvl = calculatedTVL
+      walletHolding.markModified("tvl")
     } else if (log.eventName === "ETFCreated") {
       const {
         vault,
@@ -633,9 +928,10 @@ function formatUSDValue(value: bigint): string {
 /**
  * Fetch portfolio value and NAV from vault contract
  */
-async function fetchVaultPortfolio(
+export async function fetchVaultPortfolio(
   client: PublicClient,
-  vaultAddress: `0x${string}`
+  vaultAddress: `0x${string}`,
+  shareDecimals?: number
 ): Promise<{
   totalValue: string
   valuesPerAsset: string[]
@@ -662,10 +958,15 @@ async function fetchVaultPortfolio(
   const totalValue = portfolioResult[0] as bigint
   const valuesPerAsset = portfolioResult[1] as bigint[]
 
+  // NAV is returned with shareDecimals, not always 18
+  // Use shareDecimals if provided, otherwise default to 18
+  const navDecimals = shareDecimals ?? 18
+  const navFormatted = formatTokenAmount(nav, navDecimals) ?? "0"
+
   return {
     totalValue: formatUSDValue(totalValue),
     valuesPerAsset: valuesPerAsset.map((value) => formatUSDValue(value)),
-    nav: formatUSDValue(nav),
+    nav: navFormatted,
   }
 }
 
@@ -700,7 +1001,8 @@ async function updateETFPortfolio(
     try {
       const portfolio = await fetchVaultPortfolio(
         client,
-        etf.vault as `0x${string}`
+        etf.vault as `0x${string}`,
+        etf.shareDecimals
       )
 
       console.log("Portfolio:", portfolio)
@@ -756,6 +1058,9 @@ async function saveEventsAndHoldings(
       const deposits = (walletHolding.deposits || []).map((deposit: any) => ({
         chain: deposit.chain,
         symbol: deposit.symbol,
+        decimals: deposit.decimals ?? 18,
+        etfVaultAddress: deposit.etfVaultAddress ?? deposit.symbol,
+        etfTokenAddress: deposit.etfTokenAddress ?? "",
         amount: deposit.amount ?? 0n,
       }))
       
@@ -781,6 +1086,11 @@ async function saveEventsAndHoldings(
         updateOp.$set.volumeTraded = walletHolding.volumeTraded
       }
 
+      // Include TVL in update
+      if (walletHolding.tvl !== undefined) {
+        updateOp.$set.tvl = walletHolding.tvl
+      }
+
       bulkOps.push({
         updateOne: {
           filter: { _id: walletHolding._id },
@@ -793,10 +1103,13 @@ async function saveEventsAndHoldings(
         ? walletHolding.toObject()
         : walletHolding
       
-      // Ensure deposits and borrows have valid amount values
+      // Ensure deposits and borrows have valid amount values with new structure
       const deposits = (doc.deposits || []).map((deposit: any) => ({
         chain: deposit.chain,
         symbol: deposit.symbol,
+        decimals: deposit.decimals ?? 18,
+        etfVaultAddress: deposit.etfVaultAddress ?? deposit.symbol,
+        etfTokenAddress: deposit.etfTokenAddress ?? "",
         amount: deposit.amount ?? 0n,
       }))
       
@@ -813,7 +1126,7 @@ async function saveEventsAndHoldings(
             deposits,
             borrows,
             rewards: [],
-            tvl: "0",
+            tvl: doc.tvl ?? 0, // Use calculated TVL or default to 0
             apy: 0,
             transactionsPerformed: doc.transactionsPerformed || 0,
             volumeTraded: doc.volumeTraded || 0n,

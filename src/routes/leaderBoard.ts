@@ -1,16 +1,9 @@
 import { Router, Request, Response } from "express"
 import WalletHolding from "../models/WalletHolding"
+import ETF from "../models/ETF"
+import { calculateWalletTVL } from "../jobs/event"
 
 const router = Router()
-
-interface LeaderBoardEntry {
-  rank: number
-  address: string
-  totalPointsAccrued: bigint
-  feesGenerated: bigint
-  volumeTraded: bigint
-  transactionsPerformed: number
-}
 
 /**
  * Calculate total points accrued from rewards
@@ -40,19 +33,60 @@ router.get("/", async (req: Request, res: Response) => {
     // Fetch all wallet holdings
     const walletHoldings = await WalletHolding.find().lean()
 
-    // Calculate leaderboard entries
-    const entries: LeaderBoardEntry[] = walletHoldings.map((holding) => {
+    // Get all ETFs for TVL calculation
+    const allETFs = await ETF.find()
+    const etfMap = new Map<string, InstanceType<typeof ETF>>()
+    for (const etf of allETFs) {
+      etfMap.set(etf.vault.toLowerCase(), etf)
+    }
+
+    // Calculate leaderboard entries with TVL
+    const entriesPromises = walletHoldings.map(async (holding) => {
       const totalPointsAccrued = calculateTotalPoints(holding.rewards || [])
+      const volumeTraded = BigInt(holding.volumeTraded?.toString() ?? "0")
+      const transactionsPerformed = holding.transactionsPerformed || 0
+      
+      // Calculate average transaction size
+      const avgTransactionSize = transactionsPerformed > 0 
+        ? volumeTraded / BigInt(transactionsPerformed)
+        : 0n
+      
+      // Calculate points per transaction
+      const pointsPerTransaction = transactionsPerformed > 0
+        ? totalPointsAccrued / BigInt(transactionsPerformed)
+        : 0n
+      
+      // Calculate TVL if not set or if deposits exist
+      let tvl = holding.tvl || 0
+      if ((!tvl || tvl === 0) && holding.deposits && holding.deposits.length > 0) {
+        try {
+          // Calculate TVL on the fly
+          tvl = await calculateWalletTVL(holding.deposits as any, etfMap)
+          // Optionally update the wallet in background (don't await)
+          WalletHolding.updateOne(
+            { _id: holding._id },
+            { $set: { tvl } }
+          ).catch(err => console.error(`Error updating TVL for wallet ${holding.wallet}:`, err))
+        } catch (error) {
+          console.error(`Error calculating TVL for wallet ${holding.wallet}:`, error)
+        }
+      }
       
       return {
         rank: 0, // Will be set after sorting
         address: holding.wallet,
         totalPointsAccrued,
         feesGenerated: 0n, // TODO: Calculate fees if needed
-        volumeTraded: BigInt(holding.volumeTraded?.toString() ?? "0"),
-        transactionsPerformed: holding.transactionsPerformed || 0,
+        volumeTraded,
+        transactionsPerformed,
+        tvl,
+        avgTransactionSize,
+        pointsPerTransaction,
+        lastActivity: holding.updatedAt || null,
       }
     })
+
+    const entries = await Promise.all(entriesPromises)
 
     // Sort entries based on sortBy parameter
     entries.sort((a, b) => {
@@ -93,6 +127,10 @@ router.get("/", async (req: Request, res: Response) => {
       feesGenerated: entry.feesGenerated.toString(),
       volumeTraded: entry.volumeTraded.toString(),
       transactionsPerformed: entry.transactionsPerformed,
+      tvl: entry.tvl,
+      avgTransactionSize: entry.avgTransactionSize.toString(),
+      pointsPerTransaction: entry.pointsPerTransaction.toString(),
+      lastActivity: entry.lastActivity ? entry.lastActivity.toISOString() : null,
     }))
 
     return res.json({
