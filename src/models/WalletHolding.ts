@@ -10,6 +10,9 @@ export interface IWalletHolding extends Document {
   deposits: {
     chain: number
     symbol: string
+    decimals: number
+    etfVaultAddress: string
+    etfTokenAddress: string
     amount: bigint
   }[]
   tvl: number
@@ -61,6 +64,18 @@ const WalletHoldingSchema: Schema = new Schema(
             required: true,
           },
           symbol: {
+            type: String,
+            required: true,
+          },
+          decimals: {
+            type: Number,
+            required: true,
+          },
+          etfVaultAddress: {
+            type: String,
+            required: true,
+          },
+          etfTokenAddress: {
             type: String,
             required: true,
           },
