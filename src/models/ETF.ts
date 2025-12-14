@@ -23,13 +23,10 @@ export interface IETF extends Document {
   eventNonce: bigint
   eventHeight: bigint
   etfNonce: bigint
-  etfHeight: bigint
   factory?: string
   depositFeed?: string
-  router?: string
   assets?: AssetConfig[]
   imbalanceThresholdBps?: bigint
-  maxPriceStaleness?: bigint
   depositSymbol?: string
   depositDecimals?: number
   shareDecimals?: number
@@ -84,17 +81,10 @@ const ETFSchema: Schema = new Schema(
       type: BigInt,
       required: true,
     },
-    etfHeight: {
-      type: BigInt,
-      required: true,
-    },
     factory: {
       type: String,
     },
     depositFeed: {
-      type: String,
-    },
-    router: {
       type: String,
     },
     assets: {
@@ -104,22 +94,22 @@ const ETFSchema: Schema = new Schema(
             type: String,
             required: true,
           },
-          feed: {
-            type: String,
-            required: true,
-          },
+          // feed: {
+          //   type: String,
+          //   required: true,
+          // },
           targetWeightBps: {
             type: Number,
             required: true,
           },
-          depositPath: {
-            type: [String],
-            default: [],
-          },
-          withdrawPath: {
-            type: [String],
-            default: [],
-          },
+          // depositPath: {
+          //   type: [String],
+          //   default: [],
+          // },
+          // withdrawPath: {
+          //   type: [String],
+          //   default: [],
+          // },
           symbol: {
             type: String,
           },
@@ -134,9 +124,6 @@ const ETFSchema: Schema = new Schema(
       default: [],
     },
     imbalanceThresholdBps: {
-      type: BigInt,
-    },
-    maxPriceStaleness: {
       type: BigInt,
     },
     depositSymbol: {

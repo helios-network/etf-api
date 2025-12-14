@@ -183,7 +183,7 @@ const ChainlinkDataFeedSchema: Schema = new Schema(
 
 // Create compound index for feedId and sourceChain to ensure uniqueness
 // If feedId exists, it must be unique
-ChainlinkDataFeedSchema.index({ feedId: 1 }, { unique: true, sparse: true })
+ChainlinkDataFeedSchema.index({ proxyAddress: 1 }, { unique: true, sparse: true })
 // For feeds without feedId, use path + sourceChain as unique identifier
 ChainlinkDataFeedSchema.index({ path: 1, sourceChain: 1 }, { unique: true, sparse: true })
 

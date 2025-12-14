@@ -76,22 +76,17 @@ async function processFeedsForChain(
 
     for (const feed of feeds) {
       try {
-        const currentChainId = feed.sourceChain || chainId
-        const feedPath = feed.path || ""
-        
-        // Determine unique identifier: use feedId if available, otherwise use path + sourceChain
-        const query = feed.feedId
-          ? { feedId: feed.feedId }
-          : { path: feedPath, sourceChain: currentChainId, feedId: null }
 
+        if (!feed.proxyAddress) {
+          continue
+        }
+        
         // Check if feed already exists
-        const existingFeed = await ChainlinkDataFeed.findOne(query)
+        const existingFeed = await ChainlinkDataFeed.findOne({ proxyAddress: feed.proxyAddress })
 
         if (existingFeed) {
           // Update existing feed
-          const updateQuery = feed.feedId
-            ? { feedId: feed.feedId }
-            : { path: feedPath, sourceChain: currentChainId, feedId: null }
+          const updateQuery = { proxyAddress: feed.proxyAddress }
           
           await ChainlinkDataFeed.updateOne(
             updateQuery,

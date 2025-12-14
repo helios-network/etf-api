@@ -1,7 +1,6 @@
 import { Router, Request, Response } from "express"
 import WalletHolding from "../models/WalletHolding"
-import ETF from "../models/ETF"
-import { calculateWalletTVL } from "../jobs/event"
+import { calculateWalletTVL } from "../models/utils/WalletHoldingUtils"
 
 const router = Router()
 
@@ -33,13 +32,6 @@ router.get("/", async (req: Request, res: Response) => {
     // Fetch all wallet holdings
     const walletHoldings = await WalletHolding.find().lean()
 
-    // Get all ETFs for TVL calculation
-    const allETFs = await ETF.find()
-    const etfMap = new Map<string, InstanceType<typeof ETF>>()
-    for (const etf of allETFs) {
-      etfMap.set(etf.vault.toLowerCase(), etf)
-    }
-
     // Calculate leaderboard entries with TVL
     const entriesPromises = walletHoldings.map(async (holding) => {
       const totalPointsAccrued = calculateTotalPoints(holding.rewards || [])
@@ -60,8 +52,8 @@ router.get("/", async (req: Request, res: Response) => {
       let tvl = holding.tvl || 0
       if ((!tvl || tvl === 0) && holding.deposits && holding.deposits.length > 0) {
         try {
-          // Calculate TVL on the fly
-          tvl = await calculateWalletTVL(holding.deposits as any, etfMap)
+          // Calculate TVL on the fly (function now fetches ETFs from DB using deposit vault addresses)
+          tvl = await calculateWalletTVL(holding.deposits as any)
           // Optionally update the wallet in background (don't await)
           WalletHolding.updateOne(
             { _id: holding._id },
