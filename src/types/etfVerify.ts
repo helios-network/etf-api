@@ -92,6 +92,19 @@ export interface V3PoolInfo {
   token1: string
 }
 
+export interface V3PathInfo {
+  exists: boolean
+  liquidityUSD: number
+  isDirect: boolean // true if direct pool, false if via WETH
+  // For direct path
+  fee?: number
+  token0?: string
+  token1?: string
+  // For 2-hop path via WETH
+  depositToWethFee?: number
+  wethToTargetFee?: number
+}
+
 export interface ResolutionResult {
   pricingMode: PricingMode
   feed: ChainlinkFeed | null

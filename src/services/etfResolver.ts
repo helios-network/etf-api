@@ -2,7 +2,7 @@ import { type PublicClient, erc20Abi, encodeAbiParameters, encodePacked } from "
 import { MIN_LIQUIDITY_USD } from "../constants"
 import { resolveChainlinkFeed, resolveUSDCFeed } from "./chainlinkResolver"
 import { findV2Path } from "./uniswapV2Resolver"
-import { findBestV3Pool, encodeV3Path } from "./uniswapV3Resolver"
+import { findV3Path, encodeV3Path } from "./uniswapV3Resolver"
 import {
   TokenMetadata,
   ResolutionResult,
@@ -170,7 +170,7 @@ export async function resolveToken(
     )
 
     if (targetPrice) {
-      const v3Pool = await findBestV3Pool(
+      const v3Path = await findV3Path(
         client,
         depositToken,
         targetToken,
@@ -180,16 +180,56 @@ export async function resolveToken(
         targetPrice
       )
 
-      if (v3Pool.exists && v3Pool.liquidityUSD >= MIN_LIQUIDITY_USD) {
-        const v3PathBytes = encodeV3Path(
-          depositToken,
-          v3Pool.fee,
-          targetToken
-        )
+      if (v3Path.exists && v3Path.liquidityUSD >= MIN_LIQUIDITY_USD) {
+        const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as `0x${string}`
+        
+        let v3PathBytes: string
+        let fee: number
+        
+        if (v3Path.isDirect && v3Path.fee) {
+          // Direct path
+          v3PathBytes = encodeV3Path(depositToken, v3Path.fee, targetToken)
+          fee = v3Path.fee
+        } else if (v3Path.depositToWethFee && v3Path.wethToTargetFee) {
+          // 2-hop path via WETH
+          v3PathBytes = encodeV3Path(
+            depositToken,
+            v3Path.depositToWethFee,
+            WETH,
+            v3Path.wethToTargetFee,
+            targetToken
+          )
+          // Use the first fee for encoding (both fees are needed in the path)
+          fee = v3Path.depositToWethFee
+        } else {
+          throw new Error("Invalid V3 path configuration")
+        }
+        
         // For V3: encode(["bytes", "uint24"], [v3Path, fee])
         const encoded = encodeAbiParameters(
           [{ type: "bytes" }, { type: "uint24" }],
-          [v3PathBytes as `0x${string}`, v3Pool.fee]
+          [v3PathBytes as `0x${string}`, fee]
+        )
+
+        // Encode withdraw path (reverse)
+        let withdrawPathBytes: string
+        if (v3Path.isDirect && v3Path.fee) {
+          withdrawPathBytes = encodeV3Path(targetToken, v3Path.fee, depositToken)
+        } else if (v3Path.depositToWethFee && v3Path.wethToTargetFee) {
+          withdrawPathBytes = encodeV3Path(
+            targetToken,
+            v3Path.wethToTargetFee,
+            WETH,
+            v3Path.depositToWethFee,
+            depositToken
+          )
+        } else {
+          throw new Error("Invalid V3 path configuration")
+        }
+        
+        const withdrawEncoded = encodeAbiParameters(
+          [{ type: "bytes" }, { type: "uint24" }],
+          [withdrawPathBytes as `0x${string}`, fee]
         )
 
         return {
@@ -200,16 +240,16 @@ export async function resolveToken(
             encoded: encoded,
             token0: depositToken,
             token1: targetToken,
-            fee: v3Pool.fee,
+            fee: fee,
           },
           withdrawPath: {
             type: "V3",
-            encoded: encoded,
+            encoded: withdrawEncoded,
             token0: targetToken,
             token1: depositToken,
-            fee: v3Pool.fee,
+            fee: fee,
           },
-          liquidityUSD: v3Pool.liquidityUSD,
+          liquidityUSD: v3Path.liquidityUSD,
         }
       }
     }
@@ -248,7 +288,7 @@ export async function resolveToken(
   }
 
   // Try Mode 4: V3 + V3 (last resort)
-  const v3Pool = await findBestV3Pool(
+  const v3Path = await findV3Path(
     client,
     depositToken,
     targetToken,
@@ -258,16 +298,56 @@ export async function resolveToken(
     null // No feed, use DEX pricing
   )
 
-  if (v3Pool.exists && v3Pool.liquidityUSD >= MIN_LIQUIDITY_USD) {
-    const v3PathBytes = encodeV3Path(
-      depositToken,
-      v3Pool.fee,
-      targetToken
-    )
+  if (v3Path.exists && v3Path.liquidityUSD >= MIN_LIQUIDITY_USD) {
+    const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as `0x${string}`
+    
+    let v3PathBytes: string
+    let fee: number
+    
+    if (v3Path.isDirect && v3Path.fee) {
+      // Direct path
+      v3PathBytes = encodeV3Path(depositToken, v3Path.fee, targetToken)
+      fee = v3Path.fee
+    } else if (v3Path.depositToWethFee && v3Path.wethToTargetFee) {
+      // 2-hop path via WETH
+      v3PathBytes = encodeV3Path(
+        depositToken,
+        v3Path.depositToWethFee,
+        WETH,
+        v3Path.wethToTargetFee,
+        targetToken
+      )
+      // Use the first fee for encoding (both fees are needed in the path)
+      fee = v3Path.depositToWethFee
+    } else {
+      throw new Error("Invalid V3 path configuration")
+    }
+    
     // For V3: encode(["bytes", "uint24"], [v3Path, fee])
     const encoded = encodeAbiParameters(
       [{ type: "bytes" }, { type: "uint24" }],
-      [v3PathBytes as `0x${string}`, v3Pool.fee]
+      [v3PathBytes as `0x${string}`, fee]
+    )
+
+    // Encode withdraw path (reverse)
+    let withdrawPathBytes: string
+    if (v3Path.isDirect && v3Path.fee) {
+      withdrawPathBytes = encodeV3Path(targetToken, v3Path.fee, depositToken)
+    } else if (v3Path.depositToWethFee && v3Path.wethToTargetFee) {
+      withdrawPathBytes = encodeV3Path(
+        targetToken,
+        v3Path.wethToTargetFee,
+        WETH,
+        v3Path.depositToWethFee,
+        depositToken
+      )
+    } else {
+      throw new Error("Invalid V3 path configuration")
+    }
+    
+    const withdrawEncoded = encodeAbiParameters(
+      [{ type: "bytes" }, { type: "uint24" }],
+      [withdrawPathBytes as `0x${string}`, fee]
     )
 
     return {
@@ -278,16 +358,16 @@ export async function resolveToken(
         encoded: encoded,
         token0: depositToken,
         token1: targetToken,
-        fee: v3Pool.fee,
+        fee: fee,
       },
       withdrawPath: {
         type: "V3",
-        encoded: encoded,
+        encoded: withdrawEncoded,
         token0: targetToken,
         token1: depositToken,
-        fee: v3Pool.fee,
+        fee: fee,
       },
-      liquidityUSD: v3Pool.liquidityUSD,
+      liquidityUSD: v3Path.liquidityUSD,
     }
   }
 

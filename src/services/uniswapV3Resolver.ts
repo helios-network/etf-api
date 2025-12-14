@@ -1,5 +1,5 @@
 import { type PublicClient, parseAbi, encodePacked } from "viem"
-import { UNISWAP_V3_FACTORY, UNISWAP_V3_QUOTER, UNISWAP_V3_FEES } from "../constants"
+import { UNISWAP_V3_FACTORY, UNISWAP_V3_QUOTER, UNISWAP_V3_FEES, MIN_LIQUIDITY_USD } from "../constants"
 import { V3PoolInfo } from "../types/etfVerify"
 
 /**
@@ -227,14 +227,117 @@ export async function findBestV3Pool(
 }
 
 /**
+ * Find V3 path from depositToken to targetToken (direct or via WETH)
+ * Similar to findV2Path but for V3 pools
+ */
+export async function findV3Path(
+  client: PublicClient,
+  depositToken: `0x${string}`,
+  targetToken: `0x${string}`,
+  depositTokenDecimals: number,
+  targetTokenDecimals: number,
+  depositTokenPriceUSD: number | null,
+  targetTokenPriceUSD: number | null
+): Promise<{
+  exists: boolean
+  liquidityUSD: number
+  isDirect: boolean
+  fee?: number
+  depositToWethFee?: number
+  wethToTargetFee?: number
+}> {
+  // Try direct path first
+  const directPool = await findBestV3Pool(
+    client,
+    depositToken,
+    targetToken,
+    depositTokenDecimals,
+    targetTokenDecimals,
+    depositTokenPriceUSD,
+    targetTokenPriceUSD
+  )
+
+  if (directPool.exists && directPool.liquidityUSD >= MIN_LIQUIDITY_USD) {
+    return {
+      exists: true,
+      liquidityUSD: directPool.liquidityUSD,
+      isDirect: true,
+      fee: directPool.fee,
+    }
+  }
+
+  // Try 2-hop path via WETH (most common intermediate token on Ethereum)
+  const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as `0x${string}`
+  
+  // Find best pool for depositToken -> WETH
+  const depositToWethPool = await findBestV3Pool(
+    client,
+    depositToken,
+    WETH,
+    depositTokenDecimals,
+    18, // WETH decimals
+    depositTokenPriceUSD,
+    null // WETH price (we'll estimate)
+  )
+
+  // Find best pool for WETH -> targetToken
+  const wethToTargetPool = await findBestV3Pool(
+    client,
+    WETH,
+    targetToken,
+    18, // WETH decimals
+    targetTokenDecimals,
+    null, // WETH price
+    targetTokenPriceUSD
+  )
+
+  // Take minimum liquidity of the path
+  const twoHopLiquidity = Math.min(
+    depositToWethPool.liquidityUSD,
+    wethToTargetPool.liquidityUSD
+  )
+
+  if (
+    depositToWethPool.exists &&
+    wethToTargetPool.exists &&
+    twoHopLiquidity >= MIN_LIQUIDITY_USD
+  ) {
+    return {
+      exists: true,
+      liquidityUSD: twoHopLiquidity,
+      isDirect: false,
+      depositToWethFee: depositToWethPool.fee,
+      wethToTargetFee: wethToTargetPool.fee,
+    }
+  }
+
+  return {
+    exists: false,
+    liquidityUSD: 0,
+    isDirect: false,
+  }
+}
+
+/**
  * Encode V3 path for deposit/withdraw
- * Format: token0 (20 bytes) + fee (3 bytes) + token1 (20 bytes)
+ * Format for direct: token0 (20 bytes) + fee (3 bytes) + token1 (20 bytes)
+ * Format for 2-hop: token0 (20 bytes) + fee (3 bytes) + token1 (20 bytes) + fee (3 bytes) + token2 (20 bytes)
  */
 export function encodeV3Path(
   token0: `0x${string}`,
   fee: number,
-  token1: `0x${string}`
+  token1: `0x${string}`,
+  fee2?: number,
+  token2?: `0x${string}`
 ): string {
+  if (fee2 !== undefined && token2 !== undefined) {
+    // 2-hop path: token0 + fee + token1 + fee2 + token2
+    return encodePacked(
+      ["address", "uint24", "address", "uint24", "address"],
+      [token0, fee, token1, fee2, token2]
+    )
+  }
+  // Direct path: token0 + fee + token1
   return encodePacked(
     ["address", "uint24", "address"],
     [token0, fee, token1]
