@@ -93,7 +93,335 @@ function encodeV2Paths(depositPath: string[], withdrawPath: string[]): string {
 }
 
 /**
+ * Find all possible pricing modes for a token
+ * Returns an array of modes that are valid for this token
+ */
+export async function findPossibleModes(
+  client: PublicClient,
+  depositToken: `0x${string}`,
+  targetToken: `0x${string}`,
+  chainId: number,
+  depositTokenMetadata: TokenMetadata,
+  targetTokenMetadata: TokenMetadata
+): Promise<PricingMode[]> {
+  const possibleModes: PricingMode[] = []
+  
+  // Get USDC feed for pricing
+  const usdcFeed = await resolveUSDCFeed(chainId)
+  const usdcPrice = usdcFeed
+    ? await getChainlinkPrice(client, usdcFeed.proxyAddress as `0x${string}`, usdcFeed.decimals)
+    : null
+
+  // Check for Chainlink feed
+  let targetFeed = await resolveChainlinkFeed(targetTokenMetadata.symbol, chainId)
+  if (!targetFeed && targetTokenMetadata.symbol.startsWith("W")) {
+    const wrappedToken = await resolveChainlinkFeed(targetTokenMetadata.symbol.slice(1), chainId)
+    if (wrappedToken) {
+      targetFeed = wrappedToken
+    }
+  }
+
+  const hasFeed = targetFeed !== null
+  let targetPrice: number | null = null
+  if (hasFeed) {
+    targetPrice = await getChainlinkPrice(
+      client,
+      targetFeed!.proxyAddress as `0x${string}`,
+      targetFeed!.decimals
+    )
+  }
+
+  // Check Mode 1: V2 + Chainlink Feed
+  if (hasFeed && targetPrice) {
+    const v2Path = await findV2Path(
+      client,
+      depositToken,
+      targetToken,
+      depositTokenMetadata.decimals,
+      targetTokenMetadata.decimals,
+      usdcPrice,
+      targetPrice
+    )
+    if (v2Path.exists && v2Path.liquidityUSD >= MIN_LIQUIDITY_USD) {
+      possibleModes.push("V2_PLUS_FEED")
+    }
+  }
+
+  // Check Mode 2: V3 + Chainlink Feed
+  if (hasFeed && targetPrice) {
+    const v3Path = await findV3Path(
+      client,
+      depositToken,
+      targetToken,
+      depositTokenMetadata.decimals,
+      targetTokenMetadata.decimals,
+      usdcPrice,
+      targetPrice
+    )
+    if (v3Path.exists && v3Path.liquidityUSD >= MIN_LIQUIDITY_USD) {
+      possibleModes.push("V3_PLUS_FEED")
+    }
+  }
+
+  // Check Mode 3: V2 + V2 (DEX-only)
+  const v2Path = await findV2Path(
+    client,
+    depositToken,
+    targetToken,
+    depositTokenMetadata.decimals,
+    targetTokenMetadata.decimals,
+    usdcPrice,
+    null
+  )
+  if (v2Path.exists && v2Path.liquidityUSD >= MIN_LIQUIDITY_USD) {
+    possibleModes.push("V2_PLUS_V2")
+  }
+
+  // Check Mode 4: V3 + V3 (last resort)
+  const v3Path = await findV3Path(
+    client,
+    depositToken,
+    targetToken,
+    depositTokenMetadata.decimals,
+    targetTokenMetadata.decimals,
+    usdcPrice,
+    null
+  )
+  if (v3Path.exists && v3Path.liquidityUSD >= MIN_LIQUIDITY_USD) {
+    possibleModes.push("V3_PLUS_V3")
+  }
+
+  return possibleModes
+}
+
+/**
+ * Resolve token with a specific pricing mode
+ */
+export async function resolveTokenWithMode(
+  client: PublicClient,
+  depositToken: `0x${string}`,
+  targetToken: `0x${string}`,
+  chainId: number,
+  depositTokenMetadata: TokenMetadata,
+  targetTokenMetadata: TokenMetadata,
+  pricingMode: PricingMode
+): Promise<ResolutionResult> {
+  // Get USDC feed for pricing
+  const usdcFeed = await resolveUSDCFeed(chainId)
+  const usdcPrice = usdcFeed
+    ? await getChainlinkPrice(client, usdcFeed.proxyAddress as `0x${string}`, usdcFeed.decimals)
+    : null
+
+  // Get target feed if available
+  let targetFeed = await resolveChainlinkFeed(targetTokenMetadata.symbol, chainId)
+  if (!targetFeed && targetTokenMetadata.symbol.startsWith("W")) {
+    const wrappedToken = await resolveChainlinkFeed(targetTokenMetadata.symbol.slice(1), chainId)
+    if (wrappedToken) {
+      targetFeed = wrappedToken
+    }
+  }
+
+  const targetPrice = targetFeed
+    ? await getChainlinkPrice(
+        client,
+        targetFeed.proxyAddress as `0x${string}`,
+        targetFeed.decimals
+      )
+    : null
+
+  // Resolve based on specific mode
+  switch (pricingMode) {
+    case "V2_PLUS_FEED":
+      if (!targetFeed || !targetPrice) {
+        throw new Error("V2_PLUS_FEED requires Chainlink feed")
+      }
+      const v2PathFeed = await findV2Path(
+        client,
+        depositToken,
+        targetToken,
+        depositTokenMetadata.decimals,
+        targetTokenMetadata.decimals,
+        usdcPrice,
+        targetPrice
+      )
+      if (!v2PathFeed.exists || v2PathFeed.liquidityUSD < MIN_LIQUIDITY_USD) {
+        throw new Error("V2_PLUS_FEED: Insufficient liquidity")
+      }
+      const withdrawPathFeed = [...v2PathFeed.path].reverse()
+      const encodedFeed = encodeV2Paths(v2PathFeed.path, withdrawPathFeed)
+      return {
+        pricingMode: "V2_PLUS_FEED",
+        feed: targetFeed,
+        depositPath: {
+          type: "V2",
+          encoded: encodedFeed,
+          path: v2PathFeed.path,
+        },
+        withdrawPath: {
+          type: "V2",
+          encoded: encodedFeed,
+          path: withdrawPathFeed,
+        },
+        liquidityUSD: v2PathFeed.liquidityUSD,
+      }
+
+    case "V3_PLUS_FEED":
+      if (!targetFeed || !targetPrice) {
+        throw new Error("V3_PLUS_FEED requires Chainlink feed")
+      }
+      const v3PathFeed = await findV3Path(
+        client,
+        depositToken,
+        targetToken,
+        depositTokenMetadata.decimals,
+        targetTokenMetadata.decimals,
+        usdcPrice,
+        targetPrice
+      )
+      if (!v3PathFeed.exists || v3PathFeed.liquidityUSD < MIN_LIQUIDITY_USD) {
+        throw new Error("V3_PLUS_FEED: Insufficient liquidity")
+      }
+      return encodeV3ResolutionResult(v3PathFeed, depositToken, targetToken, targetFeed)
+
+    case "V2_PLUS_V2":
+      const v2Path = await findV2Path(
+        client,
+        depositToken,
+        targetToken,
+        depositTokenMetadata.decimals,
+        targetTokenMetadata.decimals,
+        usdcPrice,
+        null
+      )
+      if (!v2Path.exists || v2Path.liquidityUSD < MIN_LIQUIDITY_USD) {
+        throw new Error("V2_PLUS_V2: Insufficient liquidity")
+      }
+      const withdrawPath = [...v2Path.path].reverse()
+      const encoded = encodeV2Paths(v2Path.path, withdrawPath)
+      return {
+        pricingMode: "V2_PLUS_V2",
+        feed: null,
+        depositPath: {
+          type: "V2",
+          encoded: encoded,
+          path: v2Path.path,
+        },
+        withdrawPath: {
+          type: "V2",
+          encoded: encoded,
+          path: withdrawPath,
+        },
+        liquidityUSD: v2Path.liquidityUSD,
+      }
+
+    case "V3_PLUS_V3":
+      const v3Path = await findV3Path(
+        client,
+        depositToken,
+        targetToken,
+        depositTokenMetadata.decimals,
+        targetTokenMetadata.decimals,
+        usdcPrice,
+        null
+      )
+      if (!v3Path.exists || v3Path.liquidityUSD < MIN_LIQUIDITY_USD) {
+        throw new Error("V3_PLUS_V3: Insufficient liquidity")
+      }
+      return encodeV3ResolutionResult(v3Path, depositToken, targetToken, null)
+
+    default:
+      throw new Error(`Unknown pricing mode: ${pricingMode}`)
+  }
+}
+
+/**
+ * Helper function to encode V3 resolution result
+ */
+function encodeV3ResolutionResult(
+  v3Path: {
+    exists: boolean
+    liquidityUSD: number
+    isDirect: boolean
+    fee?: number
+    depositToWethFee?: number
+    wethToTargetFee?: number
+  },
+  depositToken: `0x${string}`,
+  targetToken: `0x${string}`,
+  feed: any
+): ResolutionResult {
+  const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as `0x${string}`
+  
+  let v3PathBytes: string
+  let fee: number
+  
+  if (v3Path.isDirect && v3Path.fee) {
+    v3PathBytes = encodeV3Path(depositToken, v3Path.fee, targetToken)
+    fee = v3Path.fee
+  } else if (v3Path.depositToWethFee && v3Path.wethToTargetFee) {
+    v3PathBytes = encodeV3Path(
+      depositToken,
+      v3Path.depositToWethFee,
+      WETH,
+      v3Path.wethToTargetFee,
+      targetToken
+    )
+    fee = v3Path.depositToWethFee
+  } else {
+    throw new Error("Invalid V3 path configuration")
+  }
+  
+  const encoded = encodeAbiParameters(
+    [{ type: "bytes" }, { type: "uint24" }],
+    [v3PathBytes as `0x${string}`, fee]
+  )
+
+  let withdrawPathBytes: string
+  if (v3Path.isDirect && v3Path.fee) {
+    withdrawPathBytes = encodeV3Path(targetToken, v3Path.fee, depositToken)
+  } else if (v3Path.depositToWethFee && v3Path.wethToTargetFee) {
+    withdrawPathBytes = encodeV3Path(
+      targetToken,
+      v3Path.wethToTargetFee,
+      WETH,
+      v3Path.depositToWethFee,
+      depositToken
+    )
+  } else {
+    throw new Error("Invalid V3 path configuration")
+  }
+  
+  const withdrawEncoded = encodeAbiParameters(
+    [{ type: "bytes" }, { type: "uint24" }],
+    [withdrawPathBytes as `0x${string}`, fee]
+  )
+
+  const pricingMode = feed ? "V3_PLUS_FEED" : "V3_PLUS_V3"
+  
+  return {
+    pricingMode: pricingMode as PricingMode,
+    feed: feed,
+    depositPath: {
+      type: "V3",
+      encoded: encoded,
+      token0: depositToken,
+      token1: targetToken,
+      fee: fee,
+    },
+    withdrawPath: {
+      type: "V3",
+      encoded: withdrawEncoded,
+      token0: targetToken,
+      token1: depositToken,
+      fee: fee,
+    },
+    liquidityUSD: v3Path.liquidityUSD,
+  }
+}
+
+/**
  * Main resolution function - follows strict pipeline order
+ * @deprecated Use findPossibleModes and resolveTokenWithMode instead
  */
 export async function resolveToken(
   client: PublicClient,

@@ -1,7 +1,8 @@
 import { Router, Request, Response } from "express"
 import ETF from "../models/ETF"
 import { publicClients, ChainId } from "../config/web3"
-import { resolveToken, getTokenMetadata } from "../services/etfResolver"
+import { findPossibleModes, resolveTokenWithMode, getTokenMetadata } from "../services/etfResolver"
+import { PricingMode, TokenMetadata } from "../types/etfVerify"
 import {
   VerifyRequest,
   VerifyResponse,
@@ -154,14 +155,12 @@ router.post("/verify", async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse)
     }
 
-    // Verify all components
-    const componentVerifications: ComponentVerification[] = []
+    // Step 1: Find all possible modes for each token
+    const tokenModes: Map<string, PricingMode[]> = new Map()
+    const tokenMetadataMap: Map<string, TokenMetadata> = new Map()
 
     for (const component of body.components) {
       const targetToken = component.token as `0x${string}`
-
-      console.log("targetToken", targetToken)
-      console.log("depositToken", depositToken)
 
       // Skip if target token is the same as deposit token (case-insensitive comparison)
       if (targetToken.toLowerCase() === depositToken.toLowerCase()) {
@@ -171,9 +170,10 @@ router.post("/verify", async (req: Request, res: Response) => {
       try {
         // Get target token metadata
         const targetTokenMetadata = await getTokenMetadata(client, targetToken)
+        tokenMetadataMap.set(targetToken, targetTokenMetadata)
 
-        // Resolve token (follows strict pipeline)
-        const resolution = await resolveToken(
+        // Find all possible modes for this token
+        const possibleModes = await findPossibleModes(
           client,
           depositToken,
           targetToken,
@@ -182,21 +182,21 @@ router.post("/verify", async (req: Request, res: Response) => {
           targetTokenMetadata
         )
 
-        // Build component verification result
-        const componentVerification: ComponentVerification = {
-          token: targetTokenMetadata.symbol,
-          symbol: targetTokenMetadata.symbol,
-          decimals: targetTokenMetadata.decimals,
-          pricingMode: resolution.pricingMode,
-          feed: resolution.feed?.proxyAddress || null,
-          depositPath: resolution.depositPath,
-          withdrawPath: resolution.withdrawPath,
-          liquidityUSD: resolution.liquidityUSD,
+        if (possibleModes.length === 0) {
+          const errorResponse: VerifyErrorResponse = {
+            status: "ERROR",
+            reason: "INSUFFICIENT_LIQUIDITY",
+            details: {
+              token: targetTokenMetadata.symbol,
+              requiredUSD: MIN_LIQUIDITY_USD,
+              message: "No valid pricing mode found for this token",
+            },
+          }
+          return res.status(400).json(errorResponse)
         }
 
-        componentVerifications.push(componentVerification)
+        tokenModes.set(targetToken, possibleModes)
       } catch (error) {
-        // If resolution fails, return error immediately
         let targetSymbol = component.token
         try {
           const metadata = await getTokenMetadata(client, targetToken)
@@ -205,19 +205,99 @@ router.post("/verify", async (req: Request, res: Response) => {
           // Keep original token address if metadata fetch fails
         }
 
-        const errorMessage = error instanceof Error ? error.message : "Unknown error"
-        const isLiquidityError = errorMessage.includes("Insufficient liquidity") || errorMessage.includes("no pools")
-
         const errorResponse: VerifyErrorResponse = {
           status: "ERROR",
-          reason: isLiquidityError ? "INSUFFICIENT_LIQUIDITY" : "NO_POOL_FOUND",
+          reason: "NO_POOL_FOUND",
           details: {
             token: targetSymbol,
-            requiredUSD: MIN_LIQUIDITY_USD,
-            message: errorMessage,
+            message: error instanceof Error ? error.message : "Unknown error",
           },
         }
+        return res.status(400).json(errorResponse)
+      }
+    }
 
+    // Step 2: Find the optimal common mode
+    // Order of preference: V2_PLUS_FEED > V3_PLUS_FEED > V2_PLUS_V2 > V3_PLUS_V3
+    const modePriority: PricingMode[] = [
+      "V2_PLUS_FEED",
+      "V3_PLUS_FEED",
+      "V2_PLUS_V2",
+      "V3_PLUS_V3",
+    ]
+
+    let commonMode: PricingMode | null = null
+    for (const mode of modePriority) {
+      const allTokensSupportMode = Array.from(tokenModes.values()).every((modes) =>
+        modes.includes(mode)
+      )
+      if (allTokensSupportMode) {
+        commonMode = mode
+        break
+      }
+    }
+
+    if (!commonMode) {
+      const errorResponse: VerifyErrorResponse = {
+        status: "ERROR",
+        reason: "NO_POOL_FOUND",
+        details: {
+          token: "",
+          message: "No common pricing mode found for all tokens. Each token supports different modes.",
+        },
+      }
+      return res.status(400).json(errorResponse)
+    }
+
+    // Step 3: Resolve all tokens with the common mode
+    const componentVerifications: ComponentVerification[] = []
+
+    for (const component of body.components) {
+      const targetToken = component.token as `0x${string}`
+
+      // Skip if target token is the same as deposit token
+      if (targetToken.toLowerCase() === depositToken.toLowerCase()) {
+        continue
+      }
+
+      try {
+        const targetTokenMetadata = tokenMetadataMap.get(targetToken)!
+        
+        // Resolve token with the common mode
+        const resolution = await resolveTokenWithMode(
+          client,
+          depositToken,
+          targetToken,
+          chainId,
+          depositTokenMetadata,
+          targetTokenMetadata,
+          commonMode
+        )
+
+        // Build component verification result
+        const componentVerification: ComponentVerification = {
+          token: targetTokenMetadata.symbol,
+          symbol: targetTokenMetadata.symbol,
+          decimals: targetTokenMetadata.decimals,
+          pricingMode: commonMode, // All components use the same mode
+          feed: resolution.feed?.proxyAddress || null,
+          depositPath: resolution.depositPath,
+          withdrawPath: resolution.withdrawPath,
+          liquidityUSD: resolution.liquidityUSD,
+        }
+
+        componentVerifications.push(componentVerification)
+      } catch (error) {
+        const targetTokenMetadata = tokenMetadataMap.get(targetToken)!
+        const errorResponse: VerifyErrorResponse = {
+          status: "ERROR",
+          reason: "INSUFFICIENT_LIQUIDITY",
+          details: {
+            token: targetTokenMetadata.symbol,
+            requiredUSD: MIN_LIQUIDITY_USD,
+            message: `Token does not support pricing mode ${commonMode}: ${error instanceof Error ? error.message : "Unknown error"}`,
+          },
+        }
         return res.status(400).json(errorResponse)
       }
     }
