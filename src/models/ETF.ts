@@ -19,6 +19,7 @@ export interface IETF extends Document {
   name: string
   symbol: string
   tvl: string
+  volumeTradedUSD: string
   sharePrice?: string
   eventNonce: bigint
   eventHeight: bigint
@@ -86,6 +87,10 @@ const ETFSchema: Schema = new Schema(
     },
     depositFeed: {
       type: String,
+    },
+    volumeTradedUSD: {
+      type: String,
+      default: "0",
     },
     assets: {
       type: [

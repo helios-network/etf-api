@@ -12,11 +12,13 @@ import {
 } from "../constants"
 import { fetchVaultConfig, fetchVaultPortfolio, formatTokenAmount, formatUSDValue } from "../models/utils/VaultUtils"
 import { calculateWalletTVL } from "../models/utils/WalletHoldingUtils"
+import { ethers } from "ethers"
 
 /**
  * Middleware to update wallet TVL after deposit/redeem operations
  */
-async function middlewareAfterDepositOrRedeem(
+async function middlewareAfterDeposit(
+  shares: bigint,
   walletHolding: InstanceType<typeof WalletHolding>,
   etf: InstanceType<typeof ETF>,
   client: PublicClient
@@ -30,6 +32,45 @@ async function middlewareAfterDepositOrRedeem(
   walletHolding.tvl = calculatedTVL
   walletHolding.markModified("tvl")
 
+  if (etf.sharePrice != undefined) {
+    const sharePrice = parseFloat(etf.sharePrice)
+    const depositAmountUSD = sharePrice * Number(ethers.parseUnits(shares.toString(), etf.shareDecimals ?? 18).toString())
+    const currentVolume = Number(walletHolding.volumeTraded?.toString() ?? "0")
+
+    walletHolding.volumeTraded = (currentVolume + depositAmountUSD).toFixed(2)
+    walletHolding.markModified("volumeTraded")
+
+    etf.volumeTradedUSD = (Number(etf.volumeTradedUSD) + depositAmountUSD).toFixed(2)
+    etf.markModified("volumeTraded")
+  }
+}
+
+async function middlewareAfterRedeem(
+  shares: bigint,
+  walletHolding: InstanceType<typeof WalletHolding>,
+  etf: InstanceType<typeof ETF>,
+  client: PublicClient
+): Promise<void> {
+
+  // Update ETF TVL and share price
+  updateETFPortfolio(etf.chain, client, new Set([etf.vault]))
+
+  // Update wallet TVL
+  const calculatedTVL = await calculateWalletTVL(walletHolding.deposits)
+  walletHolding.tvl = calculatedTVL
+  walletHolding.markModified("tvl")
+
+  if (etf.sharePrice != undefined) {
+    const sharePrice = parseFloat(etf.sharePrice)
+    const depositAmountUSD = sharePrice * Number(ethers.parseUnits(shares.toString(), etf.shareDecimals ?? 18).toString())
+    const currentVolume = Number(walletHolding.volumeTraded?.toString() ?? "0")
+
+    walletHolding.volumeTraded = (currentVolume - depositAmountUSD).toFixed(2)
+    if (Number(walletHolding.volumeTraded) < 0) {
+      walletHolding.volumeTraded = "0"
+    }
+    walletHolding.markModified("volumeTraded")
+  }
 }
 
 /**
@@ -37,12 +78,12 @@ async function middlewareAfterDepositOrRedeem(
  */
 function middlewareBeforeDepositOrRedeem(
   walletHolding: InstanceType<typeof WalletHolding>,
-  volumeAmount: bigint
+  // volumeAmount: bigint
 ): void {
   const currentTransactions = walletHolding.transactionsPerformed ?? 0
-  const currentVolume = BigInt(walletHolding.volumeTraded?.toString() ?? "0")
+  // const currentVolume = BigInt(walletHolding.volumeTraded?.toString() ?? "0")
   walletHolding.transactionsPerformed = currentTransactions + 1
-  walletHolding.volumeTraded = currentVolume + volumeAmount
+  // walletHolding.volumeTraded = currentVolume + volumeAmount
   walletHolding.markModified("transactionsPerformed")
   walletHolding.markModified("volumeTraded")
 }
@@ -137,7 +178,7 @@ async function processDepositEvent(
 ): Promise<void> {
   const { vault, user, depositAmount, sharesOut } = log.args
 
-  if (!vault || !user) return
+  if (!vault || !user || !sharesOut) return
 
   // Get or create wallet holding
   const walletHolding = getOrCreateWalletHolding(user, holdingsMap)
@@ -156,7 +197,7 @@ async function processDepositEvent(
   if (depositIndex !== -1) {
     // Update existing deposit
     const currentAmount = BigInt(walletHolding.deposits[depositIndex].amount?.toString() ?? "0")
-    walletHolding.deposits[depositIndex].amount = currentAmount + (sharesOut ?? 0n)
+    walletHolding.deposits[depositIndex].amount = currentAmount + sharesOut
     
     // Always update metadata if ETF is available (to fix old deposits with wrong symbol)
       walletHolding.deposits[depositIndex].symbol = etf.symbol
@@ -173,9 +214,8 @@ async function processDepositEvent(
   }
 
   // Apply middlewares
-  const depositAmountBigInt = depositAmount ? BigInt(depositAmount.toString()) : 0n
-  middlewareBeforeDepositOrRedeem(walletHolding, depositAmountBigInt)
-  await middlewareAfterDepositOrRedeem(walletHolding, etf, client)
+  middlewareBeforeDepositOrRedeem(walletHolding)
+  await middlewareAfterDeposit(sharesOut, walletHolding, etf, client)
 }
 
 /**
@@ -187,9 +227,9 @@ async function processRedeemEvent(
   client: PublicClient,
   holdingsMap: Map<string, InstanceType<typeof WalletHolding>>
 ): Promise<void> {
-  const { vault, user, sharesIn, depositOut } = log.args
+  const { vault, user, sharesIn } = log.args
 
-  if (!vault || !user) return
+  if (!vault || !user || !sharesIn) return
 
   // Get or create wallet holding
   const walletHolding = getOrCreateWalletHolding(user, holdingsMap)
@@ -208,7 +248,7 @@ async function processRedeemEvent(
   if (depositIndex !== -1) {
     // Update existing deposit
     const currentAmount = BigInt(walletHolding.deposits[depositIndex].amount?.toString() ?? "0")
-    walletHolding.deposits[depositIndex].amount = currentAmount - (sharesIn ?? 0n)
+    walletHolding.deposits[depositIndex].amount = currentAmount - sharesIn
     
     // Always update metadata if ETF is available (to fix old deposits with wrong symbol)
     walletHolding.deposits[depositIndex].symbol = etf.symbol
@@ -218,15 +258,14 @@ async function processRedeemEvent(
     walletHolding.markModified("deposits")
   } else {
     // Create new deposit (negative amount for redeem)
-    const deposit = createDepositObject(chainId, etf, vault, 0n - (sharesIn ?? 0n))
+    const deposit = createDepositObject(chainId, etf, vault, 0n - sharesIn)
     walletHolding.deposits.push(deposit)
     walletHolding.markModified("deposits")
   }
 
   // Apply middlewares
-  const depositOutBigInt = depositOut ? BigInt(depositOut.toString()) : 0n
-  middlewareBeforeDepositOrRedeem(walletHolding, depositOutBigInt)
-  await middlewareAfterDepositOrRedeem(walletHolding, etf, client)
+  middlewareBeforeDepositOrRedeem(walletHolding)
+  await middlewareAfterRedeem(sharesIn, walletHolding, etf, client)
 }
 
 /**

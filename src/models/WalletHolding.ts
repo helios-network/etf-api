@@ -19,7 +19,7 @@ export interface IWalletHolding extends Document {
     hash?: string
   }[]
   transactionsPerformed: number
-  volumeTraded: bigint
+  volumeTraded: string
   createdAt: Date
   updatedAt: Date
 }
