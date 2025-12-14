@@ -61,3 +61,18 @@ export const DEFAULT_START_BLOCKS = {
   [ChainId.MAINNET]: 24008144n,
   [ChainId.ARBITRUM]: 0n,
 }
+
+// Uniswap V2 addresses (Ethereum Mainnet)
+export const UNISWAP_V2_FACTORY = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
+export const UNISWAP_V2_ROUTER = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+
+// Uniswap V3 addresses (Ethereum Mainnet)
+export const UNISWAP_V3_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+export const UNISWAP_V3_QUOTER = "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6"
+export const UNISWAP_V3_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+
+// Uniswap V3 pool fees (in basis points)
+export const UNISWAP_V3_FEES = [100, 500, 3000, 10000] // 0.01%, 0.05%, 0.3%, 1%
+
+// Minimum liquidity threshold in USD
+export const MIN_LIQUIDITY_USD = 1000

@@ -67,6 +67,9 @@ app.use("/api/etfs", etfsRoutes)
 app.use("/api/chainlinkDataFeeds", chainlinkDataFeedsRoutes)
 app.use("/api/leaderBoard", leaderBoardRoutes)
 
+// ETF verification endpoint (also available at /etf/verify)
+app.use("/etf", etfsRoutes)
+
 // 404 handler
 app.use((req: Request, res: Response) => {
   res.status(404).json({
