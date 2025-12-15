@@ -48,7 +48,7 @@ export class Web3Service {
     
     if (privateKey) {
       this.privateKey = privateKey as `0x${string}`;
-    } else if (nodeEnv === 'production') {
+    } else {
       this.logger.warn(
         'PRIVATE_KEY is not configured. Reward claim endpoint will fail.',
       );

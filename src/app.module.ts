@@ -2,8 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import cluster from 'cluster';
 import configuration from './config/configuration';
 import { validationSchema } from './config/validation';
 import { MongoModule } from './database/mongo/mongo.module';
@@ -19,6 +18,13 @@ import { JobsModule } from './modules/jobs/jobs.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
+function shouldLoadJobsModules(): boolean {
+  if (typeof cluster !== 'undefined' && cluster.isPrimary !== undefined) {
+    return cluster.isPrimary === true;
+  }
+  return process.env.APP_ROLE === 'master';
+}
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -26,11 +32,13 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
       load: [configuration],
       validationSchema,
       validationOptions: {
-        allowUnknown: process.env.NODE_ENV !== 'production',
+        allowUnknown: false,
         abortEarly: false,
       },
     }),
-    ScheduleModule.forRoot(),
+    ...(shouldLoadJobsModules()
+      ? [ScheduleModule.forRoot(), JobsModule]
+      : []),
     MongoModule,
     CacheModule,
     RateLimitModule,
@@ -39,11 +47,8 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     EtfsModule,
     ChainlinkDataFeedsModule,
     LeaderBoardModule,
-    JobsModule,
   ],
-  controllers: [AppController],
   providers: [
-    AppService,
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,

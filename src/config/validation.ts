@@ -1,9 +1,9 @@
 import * as Joi from 'joi';
+import * as os from 'os';
+
+const defaultWorkerCount = Math.max(1, os.cpus().length - 1);
 
 export const validationSchema = Joi.object({
-  NODE_ENV: Joi.string()
-    .valid('development', 'production', 'test')
-    .default('development'),
   PORT: Joi.number().default(3000),
   MONGODB_URI: Joi.string().required(),
   REDIS_HOST: Joi.string().default('localhost'),
@@ -26,15 +26,22 @@ export const validationSchema = Joi.object({
   RATE_LIMIT_MAX_REQUESTS: Joi.number().min(1).default(100),
   RATE_LIMIT_NAMESPACE: Joi.string().default('ratelimit'),
   PRIVATE_KEY: Joi.string()
-    .when('NODE_ENV', {
-      is: 'production',
-      then: Joi.string().required().messages({
-        'any.required': 'PRIVATE_KEY is required in production for reward claims',
-      }),
-      otherwise: Joi.string().optional(),
+    .required().messages({
+      'any.required': 'PRIVATE_KEY is required for reward claims',
     }),
   DEBUG_TVL: Joi.string()
     .valid('true', 'false', '1', '0')
     .optional(),
+  APP_ROLE: Joi.string()
+    .valid('master', 'worker')
+    .required()
+    .messages({
+      'any.required': 'APP_ROLE is required (must be "master" or "worker")',
+      'any.only': 'APP_ROLE must be either "master" or "worker"',
+    }),
+  WORKER_COUNT: Joi.number()
+    .integer()
+    .min(1)
+    .default(defaultWorkerCount),
 });
 

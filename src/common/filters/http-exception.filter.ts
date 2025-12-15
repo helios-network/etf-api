@@ -4,19 +4,13 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
-  Logger,
 } from '@nestjs/common';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { ConfigService } from '@nestjs/config';
+import { clusterLogger } from '../utils/cluster-logger';
 
-/**
- * Exception filter global pour gérer toutes les erreurs HTTP
- * Remplace le middleware d'erreur Express
- */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(HttpExceptionFilter.name);
-
   constructor(private readonly configService: ConfigService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
@@ -40,33 +34,50 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       message = exception.message;
-      this.logger.error(
+      clusterLogger.error(
         `Unhandled error: ${exception.message}`,
         exception.stack,
       );
     }
 
-    // Log de l'erreur
-    this.logger.error(
-      `${request.method} ${request.url} - ${status} - ${message}`,
-    );
+    const isDevelopment = this.configService.get<string>('nodeEnv') === 'development';
+    const isNotFound = status === HttpStatus.NOT_FOUND;
 
-    // Réponse d'erreur
-    const errorResponse = {
-      error: status === HttpStatus.NOT_FOUND ? 'Not Found' : 'Internal Server Error',
-      message:
-        status === HttpStatus.NOT_FOUND
-          ? `Route ${request.method} ${request.url} not found`
-          : this.configService.get<string>('nodeEnv') === 'development'
-            ? message
-            : 'Something went wrong',
-      ...(this.configService.get<string>('nodeEnv') === 'development' && {
-        details: errorDetails,
-        stack: exception instanceof Error ? exception.stack : undefined,
-      }),
+    if (!isNotFound || isDevelopment) {
+      if (status >= 500) {
+        clusterLogger.error(`${request.method} ${request.url} - ${status} - ${message}`);
+      } else if (status >= 400) {
+        clusterLogger.warn(`${request.method} ${request.url} - ${status} - ${message}`);
+      }
+    }
+
+    if (isNotFound) {
+      const errorResponse = {
+        error: 'Not Found',
+        message: `Route ${request.method} ${request.url} not found`,
+        statusCode: status,
+        timestamp: new Date().toISOString(),
+        path: request.url,
+      };
+      return response.status(status).send(errorResponse);
+    }
+
+    const errorResponse: any = {
+      error: status >= 500 ? 'Internal Server Error' : 'Bad Request',
+      message: isDevelopment ? message : (status >= 500 ? 'Something went wrong' : message),
+      statusCode: status,
       timestamp: new Date().toISOString(),
       path: request.url,
     };
+
+    if (isDevelopment) {
+      if (errorDetails) {
+        errorResponse.details = errorDetails;
+      }
+      if (exception instanceof Error && exception.stack) {
+        errorResponse.stack = exception.stack;
+      }
+    }
 
     response.status(status).send(errorResponse);
   }

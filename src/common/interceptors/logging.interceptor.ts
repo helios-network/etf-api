@@ -3,35 +3,34 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
-  Logger,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { clusterLogger } from '../utils/cluster-logger';
 
-/**
- * Interceptor pour logger toutes les requêtes HTTP
- * Remplace le middleware de logging Express
- */
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
-  private readonly logger = new Logger('HTTP');
-
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const { method, url } = request;
     const now = Date.now();
 
-    // Log de la requête entrante
-    this.logger.log(`${new Date().toISOString()} - ${method} ${url}`);
+    clusterLogger.debug(`→ ${method} ${url}`);
 
     return next.handle().pipe(
       tap(() => {
         const response = context.switchToHttp().getResponse();
         const { statusCode } = response;
         const delay = Date.now() - now;
-        this.logger.log(
-          `${method} ${url} ${statusCode} - ${delay}ms`,
-        );
+        const statusColor = statusCode >= 400 ? 'error' : statusCode >= 300 ? 'warn' : 'log';
+        
+        if (statusColor === 'error') {
+          clusterLogger.error(`← ${method} ${url} ${statusCode} - ${delay}ms`);
+        } else if (statusColor === 'warn') {
+          clusterLogger.warn(`← ${method} ${url} ${statusCode} - ${delay}ms`);
+        } else {
+          clusterLogger.debug(`← ${method} ${url} ${statusCode} - ${delay}ms`);
+        }
       }),
     );
   }

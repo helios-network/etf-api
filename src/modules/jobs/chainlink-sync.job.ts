@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { MasterOnly } from '../../common/decorators/master-only.decorator';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
@@ -45,6 +46,7 @@ interface ChainlinkFeed {
 }
 
 @Injectable()
+@MasterOnly()
 export class ChainlinkSyncJob {
   private readonly logger = new Logger(ChainlinkSyncJob.name);
 
@@ -53,9 +55,6 @@ export class ChainlinkSyncJob {
     private chainlinkDataFeedModel: Model<ChainlinkDataFeedDocument>,
   ) {}
 
-  /**
-   * Fetch feeds from the API
-   */
   private async fetchFeeds(url: string): Promise<ChainlinkFeed[]> {
     try {
       const response = await fetch(url);
@@ -69,9 +68,6 @@ export class ChainlinkSyncJob {
     }
   }
 
-  /**
-   * Process and save feeds for a specific chain
-   */
   private async processFeedsForChain(
     chainId: number,
     url: string,
@@ -91,13 +87,11 @@ export class ChainlinkSyncJob {
             continue;
           }
 
-          // Check if feed already exists
           const existingFeed = await this.chainlinkDataFeedModel.findOne({
             proxyAddress: feed.proxyAddress,
           });
 
           if (existingFeed) {
-            // Update existing feed
             const updateQuery = { proxyAddress: feed.proxyAddress };
 
             await this.chainlinkDataFeedModel.updateOne(updateQuery, {
@@ -130,7 +124,6 @@ export class ChainlinkSyncJob {
             });
             skippedCount++;
           } else {
-            // Insert new feed
             await this.chainlinkDataFeedModel.create({
               compareOffchain: feed.compareOffchain || '',
               contractAddress: feed.contractAddress || '',
@@ -183,23 +176,16 @@ export class ChainlinkSyncJob {
     }
   }
 
-  /**
-   * Main function to sync all Chainlink feeds
-   */
-  @Cron('0 0 0 * * *') // Every day at midnight
+  @Cron('0 0 0 * * *')
   async syncChainlinkFeeds(): Promise<void> {
     this.logger.log('Starting daily Chainlink feeds sync');
 
     try {
-      // Process Ethereum feeds
       await this.processFeedsForChain(ETHEREUM_CHAIN_ID, ETHEREUM_FEEDS_URL);
-
-      // Process Arbitrum feeds
       await this.processFeedsForChain(ARBITRUM_CHAIN_ID, ARBITRUM_FEEDS_URL);
 
       this.logger.log('Daily sync completed successfully');
     } catch (error) {
-      // Enhanced error handling for MongoDB and other errors
       if (error instanceof Error) {
         const errorMessage = error.message.toLowerCase();
         if (
@@ -212,19 +198,15 @@ export class ChainlinkSyncJob {
             `MongoDB error in Chainlink sync job: ${error.message}`,
             error.stack,
           );
-          // Don't throw, job will retry on next execution
         } else {
           this.logger.error(
             `Error in Chainlink sync job: ${error.message}`,
             error.stack,
           );
-          // For non-MongoDB errors, still don't throw to prevent job from crashing
-          // The job will retry on next cron execution
         }
       } else {
         this.logger.error('Unknown error in Chainlink sync job:', error);
       }
-      // Job will continue on next cron execution
     }
   }
 }

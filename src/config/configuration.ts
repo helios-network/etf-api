@@ -31,6 +31,8 @@ export interface RateLimitConfig {
 export interface AppConfig {
   nodeEnv: string;
   port: number;
+  appRole: 'master' | 'worker';
+  workerCount: number;
   database: DatabaseConfig;
   cache: CacheConfig;
   cors: CorsConfig;
@@ -39,9 +41,16 @@ export interface AppConfig {
   debugTvl: boolean;
 }
 
-export default (): AppConfig => ({
-  nodeEnv: process.env.NODE_ENV || 'development',
-  port: parseInt(process.env.PORT || '3000', 10),
+import * as os from 'os';
+
+export default (): AppConfig => {
+  const defaultWorkerCount = Math.max(1, os.cpus().length - 1);
+  
+  return {
+    nodeEnv: 'development',
+    port: parseInt(process.env.PORT || '3000', 10),
+    appRole: (process.env.APP_ROLE as 'master' | 'worker') || 'worker',
+    workerCount: parseInt(process.env.WORKER_COUNT || String(defaultWorkerCount), 10),
   database: {
     mongodb: {
       uri: process.env.MONGODB_URI || '',
@@ -69,9 +78,7 @@ export default (): AppConfig => ({
     origins:
       process.env.CORS_ORIGINS && process.env.CORS_ORIGINS.trim() !== ''
         ? process.env.CORS_ORIGINS.split(',').map((origin) => origin.trim())
-        : process.env.NODE_ENV === 'production'
-          ? []
-          : '*',
+        : '*',
   },
   rateLimit: {
     enabled:
@@ -87,5 +94,5 @@ export default (): AppConfig => ({
     process.env.DEBUG_TVL === 'true' ||
     process.env.DEBUG_TVL === '1' ||
     false,
-});
-
+  };
+};

@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { MasterOnly } from '../../common/decorators/master-only.decorator';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
@@ -14,6 +15,7 @@ import {
 const BATCH_SIZE = 1000; // Number of documents to process per batch
 
 @Injectable()
+@MasterOnly()
 export class RewardDistributionJob {
   constructor(
     @InjectModel(LeaderBoardRewards.name)

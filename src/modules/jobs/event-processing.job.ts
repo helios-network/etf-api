@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { MasterOnly } from '../../common/decorators/master-only.decorator';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { parseAbi, type PublicClient } from 'viem';
@@ -80,6 +81,7 @@ interface WalletHoldingData {
 }
 
 @Injectable()
+@MasterOnly()
 export class EventProcessingJob {
   private readonly logger = new Logger(EventProcessingJob.name);
   // Track missed events block height per chain

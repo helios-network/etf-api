@@ -3,19 +3,25 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import { ValidationPipe, RequestMethod, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
+import { clusterLogger } from './common/utils/cluster-logger';
+import { NestClusterLogger } from './common/utils/nest-cluster-logger';
 
-async function bootstrap() {
-  const nodeEnv = process.env.NODE_ENV || 'development';
+export async function bootstrapWorker(): Promise<void> {
+  const nodeEnv = 'development';
+  const appRole = process.env.APP_ROLE || 'worker';
   
   const fastifyAdapter = new FastifyAdapter({
-    logger: /*nodeEnv === 'production' ?*/ false /*: true*/,
+    logger: false,
     bodyLimit: 1048576,
-    disableRequestLogging: nodeEnv === 'production',
+    disableRequestLogging: true,
   });
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     fastifyAdapter,
+    {
+      logger: new NestClusterLogger(),
+    },
   );
 
   const logger = new Logger('Bootstrap');
@@ -25,10 +31,9 @@ async function bootstrap() {
   const corsConfig = configService.get<{ enabled: boolean; origins: string[] | string }>('cors');
 
   if (corsConfig?.enabled !== false) {
-    const corsOrigins = corsConfig?.origins || (nodeEnv === 'production' ? [] : '*');
+    const corsOrigins = corsConfig?.origins || '*';
     
-    // Warn in production if CORS_ORIGINS is not explicitly set
-    if (nodeEnv === 'production' && !corsConfig?.origins) {
+    if (!corsConfig?.origins) {
       logger.warn(
         'WARNING: CORS_ORIGINS is not set in production. CORS is disabled (empty array). ' +
           'If you need CORS, explicitly set CORS_ORIGINS environment variable.',
@@ -53,7 +58,6 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api', {
     exclude: [
-      { path: '/', method: RequestMethod.GET },
       { path: '/health', method: RequestMethod.GET },
       { path: '/etf', method: RequestMethod.ALL },
     ],
@@ -67,8 +71,17 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(port, '0.0.0.0');
-  logger.log(`🚀 Server is running on http://localhost:${port}`);
-  logger.log(`📝 Environment: ${appNodeEnv}`);
+  if (appRole === 'master') {
+    clusterLogger.log(`HTTP server disabled (master mode)`);
+    clusterLogger.log(`Cron jobs enabled`);
+    clusterLogger.log(`Process PID: ${process.pid}`);
+  } else {
+    await app.listen(port, '0.0.0.0');
+    clusterLogger.success(`🚀 Server is running on http://localhost:${port}`);
+    clusterLogger.log(`HTTP server enabled`);
+    clusterLogger.log(`Cron jobs disabled`);
+    clusterLogger.log(`Process PID: ${process.pid}`);
+  }
+  
+  clusterLogger.log(`📝 Environment: ${appNodeEnv}`);
 }
-bootstrap();
