@@ -34,7 +34,34 @@ export class LeaderBoardService {
     const pageNum = Math.max(1, page);
     const limitNum = Math.min(100, Math.max(1, limit));
     const sortByField = sortBy || 'points';
-    const orderNum = order === 'asc' ? 1 : -1;
+    const orderField = order || 'desc';
+
+    // Build cache key with all parameters that influence the result
+    const cacheKey = `${pageNum}:${limitNum}:${sortByField}:${orderField}`;
+
+    // Use cache-aside pattern with 10 minutes TTL
+    return await this.cacheService.wrap(
+      cacheKey,
+      async () => {
+        return await this.computeLeaderBoard(pageNum, limitNum, sortByField, orderField);
+      },
+      {
+        namespace: 'leaderboard',
+        ttl: 600, // 10 minutes
+      },
+    );
+  }
+
+  /**
+   * Compute leaderboard data (extracted for caching)
+   */
+  private async computeLeaderBoard(
+    pageNum: number,
+    limitNum: number,
+    sortByField: string,
+    orderField: 'asc' | 'desc',
+  ) {
+    const orderNum = orderField === 'asc' ? 1 : -1;
 
     // Use cursor to process wallets in batches to avoid loading all in memory
     // Process in batches of 1000 to balance memory usage and performance
