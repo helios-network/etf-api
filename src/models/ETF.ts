@@ -64,11 +64,12 @@ const ETFSchema: Schema = new Schema(
       required: true,
     },
     tvl: {
-      type: String,
-      default: "0",
+      type: Number,
+      default: 0,
     },
     sharePrice: {
-      type: String,
+      type: Number,
+      default: 0,
     },
     eventNonce: {
       type: BigInt,
@@ -89,8 +90,8 @@ const ETFSchema: Schema = new Schema(
       type: String,
     },
     volumeTradedUSD: {
-      type: String,
-      default: "0",
+      type: Number,
+      default: 0,
     },
     assets: {
       type: [

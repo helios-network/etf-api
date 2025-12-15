@@ -33,6 +33,7 @@ export interface WithdrawPath {
 
 export interface ComponentVerification {
   token: string
+  tokenAddress: string
   symbol: string
   decimals: number
   pricingMode: PricingMode
@@ -45,6 +46,7 @@ export interface ComponentVerification {
 export interface VerifySuccessResponse {
   status: "OK"
   readyForCreation: true
+  factoryAddress: string
   components: ComponentVerification[]
 }
 

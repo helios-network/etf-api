@@ -9,6 +9,7 @@ export interface IWalletHolding extends Document {
     etfVaultAddress: string
     etfTokenAddress: string
     amount: bigint
+    amountUSD: number
   }[]
   tvl: number
   rewards: {
@@ -19,7 +20,7 @@ export interface IWalletHolding extends Document {
     hash?: string
   }[]
   transactionsPerformed: number
-  volumeTraded: string
+  volumeTradedUSD: number
   createdAt: Date
   updatedAt: Date
 }
@@ -58,6 +59,11 @@ const WalletHoldingSchema: Schema = new Schema(
             type: BigInt,
             required: true,
           },
+          amountUSD: {
+            type: Number,
+            default: 0,
+            required: false,
+          },
         },
       ],
       default: [],
@@ -95,9 +101,9 @@ const WalletHoldingSchema: Schema = new Schema(
       type: Number,
       default: 0,
     },
-    volumeTraded: {
-      type: BigInt,
-      default: 0n,
+    volumeTradedUSD: {
+      type: Number,
+      default: 0,
     },
   },
   {

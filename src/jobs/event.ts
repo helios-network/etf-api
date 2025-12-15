@@ -35,13 +35,13 @@ async function middlewareAfterDeposit(
   if (etf.sharePrice != undefined) {
     const sharePrice = parseFloat(etf.sharePrice)
     const depositAmountUSD = sharePrice * Number(ethers.parseUnits(shares.toString(), etf.shareDecimals ?? 18).toString())
-    const currentVolume = Number(walletHolding.volumeTraded?.toString() ?? "0")
+    const currentVolume = walletHolding.volumeTradedUSD
 
-    walletHolding.volumeTraded = (currentVolume + depositAmountUSD).toFixed(2)
-    walletHolding.markModified("volumeTraded")
-
-    etf.volumeTradedUSD = (Number(etf.volumeTradedUSD) + depositAmountUSD).toFixed(2)
-    etf.markModified("volumeTraded")
+    walletHolding.volumeTradedUSD = Number((currentVolume + depositAmountUSD).toFixed(2))
+    if (walletHolding.volumeTradedUSD < 0) {
+      walletHolding.volumeTradedUSD = 0
+    }
+    walletHolding.markModified("volumeTradedUSD")
   }
 }
 
@@ -63,13 +63,13 @@ async function middlewareAfterRedeem(
   if (etf.sharePrice != undefined) {
     const sharePrice = parseFloat(etf.sharePrice)
     const depositAmountUSD = sharePrice * Number(ethers.parseUnits(shares.toString(), etf.shareDecimals ?? 18).toString())
-    const currentVolume = Number(walletHolding.volumeTraded?.toString() ?? "0")
+    const currentVolume = walletHolding.volumeTradedUSD
 
-    walletHolding.volumeTraded = (currentVolume - depositAmountUSD).toFixed(2)
-    if (Number(walletHolding.volumeTraded) < 0) {
-      walletHolding.volumeTraded = "0"
+    walletHolding.volumeTradedUSD = Number((currentVolume - depositAmountUSD).toFixed(2))
+    if (walletHolding.volumeTradedUSD < 0) {
+      walletHolding.volumeTradedUSD = 0
     }
-    walletHolding.markModified("volumeTraded")
+    walletHolding.markModified("volumeTradedUSD")
   }
 }
 
@@ -81,11 +81,8 @@ function middlewareBeforeDepositOrRedeem(
   // volumeAmount: bigint
 ): void {
   const currentTransactions = walletHolding.transactionsPerformed ?? 0
-  // const currentVolume = BigInt(walletHolding.volumeTraded?.toString() ?? "0")
   walletHolding.transactionsPerformed = currentTransactions + 1
-  // walletHolding.volumeTraded = currentVolume + volumeAmount
   walletHolding.markModified("transactionsPerformed")
-  walletHolding.markModified("volumeTraded")
 }
 
 /**
@@ -102,7 +99,7 @@ function getOrCreateWalletHolding(
       deposits: [],
       rewards: [],
       transactionsPerformed: 0,
-      volumeTraded: 0n,
+      volumeTradedUSD: 0,
     })
     holdingsMap.set(user, walletHolding)
   }
@@ -135,7 +132,7 @@ function findDepositIndex(
  */
 function createDepositObject(
   chainId: ChainId,
-  etf: InstanceType<typeof ETF> | null,
+  etf: InstanceType<typeof ETF>,
   vault: `0x${string}`,
   amount: bigint
 ): {
@@ -145,25 +142,16 @@ function createDepositObject(
   etfVaultAddress: string
   etfTokenAddress: string
   amount: bigint
+  amountUSD: number
 } {
-  if (etf) {
-    return {
-      chain: Number(chainId),
-      symbol: etf.symbol,
-      decimals: etf.shareDecimals ?? 18,
-      etfVaultAddress: etf.vault, // Always set vault address
-      etfTokenAddress: etf.shareToken,
-      amount: amount,
-    }
-  } else {
-    return {
-      chain: Number(chainId),
-      symbol: vault, // Use vault address as symbol when ETF not found
-      decimals: 18,
-      etfVaultAddress: vault, // Always set vault address
-      etfTokenAddress: vault, // Use vault as token address when ETF not found
-      amount: amount,
-    }
+  return {
+    chain: Number(chainId),
+    symbol: etf.symbol,
+    decimals: etf.shareDecimals ?? 18,
+    etfVaultAddress: etf.vault, // Always set vault address
+    etfTokenAddress: etf.shareToken,
+    amount: amount,
+    amountUSD: etf.sharePrice ? parseFloat(etf.sharePrice) * Number(ethers.parseUnits(amount.toString(), etf.shareDecimals ?? 18).toString()) : 0,
   }
 }
 
@@ -208,7 +196,7 @@ async function processDepositEvent(
     walletHolding.markModified("deposits")
   } else {
     // Create new deposit
-    const deposit = createDepositObject(chainId, etf, vault, sharesOut ?? 0n)
+    const deposit = createDepositObject(chainId, etf, vault, sharesOut)
     walletHolding.deposits.push(deposit)
     walletHolding.markModified("deposits")
   }
@@ -612,8 +600,8 @@ async function saveWalletHolding(
       updateOp.$set.transactionsPerformed = walletHolding.transactionsPerformed
     }
 
-    if (walletHolding.volumeTraded !== undefined) {
-      updateOp.$set.volumeTraded = walletHolding.volumeTraded
+    if (walletHolding.volumeTradedUSD !== undefined) {
+      updateOp.$set.volumeTradedUSD = walletHolding.volumeTradedUSD
     }
 
     if (walletHolding.tvl !== undefined) {
@@ -635,7 +623,7 @@ async function saveWalletHolding(
       tvl: doc.tvl ?? 0,
       apy: 0,
       transactionsPerformed: doc.transactionsPerformed || 0,
-      volumeTraded: doc.volumeTraded || 0n,
+      volumeTradedUSD: doc.volumeTradedUSD || 0,
     })
     existingWalletSet.add(walletHolding.wallet)
   }
@@ -745,9 +733,12 @@ async function updateETFPortfolio(
       // Find ETF that needs updating (not updated in the last minute)
       const etf = await ETF.findOne({
         vault: vaultAddress,
+        chain: Number(chainId),
         $or: [
           { updatedAt: { $lt: oneMinuteAgo } },
           { updatedAt: { $exists: false } },
+          { volumeTradedUSD: 0 },
+          { sharePrice: { $not: { $exists: true } } },
         ],
       })
 

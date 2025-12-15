@@ -35,13 +35,13 @@ router.get("/", async (req: Request, res: Response) => {
     // Calculate leaderboard entries with TVL
     const entriesPromises = walletHoldings.map(async (holding) => {
       const totalPointsAccrued = calculateTotalPoints(holding.rewards || [])
-      const volumeTraded = BigInt(holding.volumeTraded?.toString() ?? "0")
+      const volumeTradedUSD = holding.volumeTradedUSD || 0
       const transactionsPerformed = holding.transactionsPerformed || 0
       
       // Calculate average transaction size
       const avgTransactionSize = transactionsPerformed > 0 
-        ? volumeTraded / BigInt(transactionsPerformed)
-        : 0n
+        ? volumeTradedUSD / transactionsPerformed
+        : 0
       
       // Calculate points per transaction
       const pointsPerTransaction = transactionsPerformed > 0
@@ -69,7 +69,7 @@ router.get("/", async (req: Request, res: Response) => {
         address: holding.wallet,
         totalPointsAccrued,
         feesGenerated: 0n, // TODO: Calculate fees if needed
-        volumeTraded,
+        volumeTradedUSD,
         transactionsPerformed,
         tvl,
         avgTransactionSize,
@@ -86,7 +86,7 @@ router.get("/", async (req: Request, res: Response) => {
       
       switch (sortBy) {
         case "volume":
-          comparison = a.volumeTraded > b.volumeTraded ? 1 : a.volumeTraded < b.volumeTraded ? -1 : 0
+          comparison = a.volumeTradedUSD > b.volumeTradedUSD ? 1 : a.volumeTradedUSD < b.volumeTradedUSD ? -1 : 0
           break
         case "transactions":
           comparison = a.transactionsPerformed - b.transactionsPerformed
@@ -117,7 +117,7 @@ router.get("/", async (req: Request, res: Response) => {
       address: entry.address,
       totalPointsAccrued: entry.totalPointsAccrued.toString(),
       feesGenerated: entry.feesGenerated.toString(),
-      volumeTraded: entry.volumeTraded.toString(),
+      volumeTradedUSD: entry.volumeTradedUSD.toString(),
       transactionsPerformed: entry.transactionsPerformed,
       tvl: entry.tvl,
       avgTransactionSize: entry.avgTransactionSize.toString(),

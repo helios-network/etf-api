@@ -10,7 +10,7 @@ import {
   VerifyErrorResponse,
   ComponentVerification,
 } from "../types/etfVerify"
-import { MIN_LIQUIDITY_USD } from "../constants"
+import { ETF_CONTRACT_ADDRS, MIN_LIQUIDITY_USD } from "../constants"
 
 const router = Router()
 
@@ -277,6 +277,7 @@ router.post("/verify", async (req: Request, res: Response) => {
         // Build component verification result
         const componentVerification: ComponentVerification = {
           token: targetTokenMetadata.symbol,
+          tokenAddress: targetToken,
           symbol: targetTokenMetadata.symbol,
           decimals: targetTokenMetadata.decimals,
           pricingMode: commonMode, // All components use the same mode
@@ -306,6 +307,7 @@ router.post("/verify", async (req: Request, res: Response) => {
     const successResponse: VerifySuccessResponse = {
       status: "OK",
       readyForCreation: true,
+      factoryAddress: ETF_CONTRACT_ADDRS[chainId],
       components: componentVerifications,
     }
 
