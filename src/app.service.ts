@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 
 @Injectable()
 export class AppService {
-  getHello(): string {
-    return 'Hello World!';
+  getWelcome() {
+    return {
+      message: 'Welcome to Helios ETF API',
+      status: 'running',
+      timestamp: new Date().toISOString(),
+    };
   }
 }
