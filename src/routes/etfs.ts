@@ -19,6 +19,12 @@ router.get("/", async (req: Request, res: Response) => {
     const page = parseInt(req.query.page as string) || 1
     const size = parseInt(req.query.size as string) || 10
 
+    let filterByDepositToken = undefined;
+
+    if (req.query.depositToken) {
+      filterByDepositToken = req.query.depositToken as string
+    }
+
     // Validate pagination parameters
     if (page < 1) {
       return res.status(400).json({
@@ -41,7 +47,7 @@ router.get("/", async (req: Request, res: Response) => {
     const total = await ETF.countDocuments()
 
     // Fetch ETFs with pagination
-    const etfs = await ETF.find()
+    const etfs = await ETF.find(filterByDepositToken ? { depositToken: filterByDepositToken } : {})
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(size)
@@ -63,6 +69,32 @@ router.get("/", async (req: Request, res: Response) => {
         hasNextPage,
         hasPreviousPage,
       },
+    })
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    })
+  }
+})
+
+/**
+ * GET /etf/totalSupply
+ * Get total supply of an ETF
+ */
+router.get("/deposit-tokens", async (req: Request, res: Response) => {
+  try {
+    const depositTokens = await ETF.distinct("depositToken")
+
+    const depositTokenMetadata = await Promise.all(depositTokens.map(async (token) => {
+      const client = publicClients[ChainId.MAINNET]
+      const metadata = await getTokenMetadata(client, token as `0x${string}`)
+      return metadata
+    }))
+
+    return res.json({
+      success: true,
+      data: depositTokenMetadata,
     })
   } catch (error) {
     return res.status(500).json({
