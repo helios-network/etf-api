@@ -14,6 +14,19 @@ import { fetchVaultConfig, fetchVaultPortfolio, formatTokenAmount, formatUSDValu
 import { calculateWalletTVL } from "../models/utils/WalletHoldingUtils"
 import { ethers } from "ethers"
 
+// Constants following the Go code pattern
+const ETH_BLOCK_CONFIRMATION_DELAY = 4n // Minimum number of confirmations for a block to be considered valid
+const DEFAULT_BLOCKS_TO_SEARCH = 2000n // Maximum block range for event query
+
+// Average block time in milliseconds (Ethereum mainnet ~12s, Arbitrum ~0.25s)
+const AVERAGE_BLOCK_TIME_MS: Record<ChainId, bigint> = {
+  [ChainId.MAINNET]: 12000n, // 12 seconds
+  [ChainId.ARBITRUM]: 250n, // 0.25 seconds
+}
+
+// Track missed events block height per chain
+const missedEventsBlockHeight: Map<ChainId, bigint> = new Map()
+
 /**
  * Middleware to update wallet TVL after deposit/redeem operations
  */
@@ -384,17 +397,32 @@ type EventLog = {
 /**
  * Get all nonces between lastNonce and currentEventNonce to optimize RPC calls
  */
-function getNoncesResearched(lastNonce: bigint, currentEventNonce: bigint): Set<bigint> {
-  const noncesResearched = new Set<bigint>()
+function getNoncesResearched(lastNonce: bigint, currentEventNonce: bigint): bigint[] {
+  const noncesResearched: bigint[] = []
   for (let i = lastNonce + 1n; i <= currentEventNonce; i++) {
-    noncesResearched.add(i)
+    noncesResearched.push(i)
   }
   return noncesResearched
 }
 
 /**
+ * Filter events by nonce (following Go code pattern)
+ */
+function filterEvents(events: EventLog[], nonce: bigint): EventLog[] {
+  const filtered: EventLog[] = []
+  for (const e of events) {
+    const eventNonce = e.args.eventNonce ?? e.args.nonce ?? 0n
+    if (eventNonce > nonce) {
+      filtered.push(e)
+    }
+  }
+  return filtered
+}
+
+/**
  * Get factory events from blockchain in order of most likely to be used
  * Stops early if all nonces have been found to optimize RPC calls
+ * Following Go code pattern exactly
  */
 async function getFactoryEvents(
   client: PublicClient,
@@ -402,125 +430,124 @@ async function getFactoryEvents(
   fromBlock: bigint,
   toBlock: bigint,
   lastNonce: bigint,
-  noncesResearched: Set<bigint>
+  noncesResearched: bigint[]
 ): Promise<EventLog[]> {
   const newEvents: EventLog[] = []
-  const noncesFound = new Set<bigint>()
+  const noncesFound: bigint[] = []
 
   // 1. Deposit events (most frequent)
-  const depositEvents = (
-    await client.getLogs({
-      address: contractAddress,
-      fromBlock,
-      toBlock,
-      events: parseAbi([
-        "event Deposit(address indexed vault, address user, uint256 depositAmount, uint256 sharesOut, uint256 eventNonce, uint256 eventHeight)",
-      ]),
-    })
-  ).filter((log: any) => (log.args.eventNonce ?? 0n) > lastNonce)
+  const depositEvents = await client.getLogs({
+    address: contractAddress,
+    fromBlock,
+    toBlock,
+    events: parseAbi([
+      "event Deposit(address indexed vault, address user, uint256 depositAmount, uint256 sharesOut, uint256 eventNonce, uint256 eventHeight)",
+    ]),
+  })
 
   for (const log of depositEvents) {
-    newEvents.push(log as EventLog)
-    const nonce = (log as any).args.eventNonce ?? 0n
-    if (nonce > lastNonce && noncesResearched.has(nonce)) {
-      noncesFound.add(nonce)
+    const ev = log as EventLog
+    newEvents.push(ev)
+    const nonce = ev.args.eventNonce ?? ev.args.nonce ?? 0n
+    if (nonce > lastNonce && noncesResearched.includes(nonce)) {
+      noncesFound.push(nonce)
     }
   }
 
-  if (noncesFound.size === noncesResearched.size) {
+  if (noncesFound.length === noncesResearched.length) {
     // All nonces found - gain of 4 calls eth_logs to the ethereum rpc
+    console.log("all nonces have been found for events - gain of 4 calls eth_logs to the ethereum rpc")
     return newEvents
   }
 
   // 2. Redeem events
-  const redeemEvents = (
-    await client.getLogs({
-      address: contractAddress,
-      fromBlock,
-      toBlock,
-      events: parseAbi([
-        "event Redeem(address indexed vault, address user, uint256 sharesIn, uint256 depositOut, uint256 eventNonce, uint256 eventHeight)",
-      ]),
-    })
-  ).filter((log: any) => (log.args.eventNonce ?? 0n) > lastNonce)
+  const redeemEvents = await client.getLogs({
+    address: contractAddress,
+    fromBlock,
+    toBlock,
+    events: parseAbi([
+      "event Redeem(address indexed vault, address user, uint256 sharesIn, uint256 depositOut, uint256 eventNonce, uint256 eventHeight)",
+    ]),
+  })
 
   for (const log of redeemEvents) {
-    newEvents.push(log as EventLog)
-    const nonce = (log as any).args.eventNonce ?? 0n
-    if (nonce > lastNonce && noncesResearched.has(nonce)) {
-      noncesFound.add(nonce)
+    const ev = log as EventLog
+    newEvents.push(ev)
+    const nonce = ev.args.eventNonce ?? ev.args.nonce ?? 0n
+    if (nonce > lastNonce && noncesResearched.includes(nonce)) {
+      noncesFound.push(nonce)
     }
   }
 
-  if (noncesFound.size === noncesResearched.size) {
+  if (noncesFound.length === noncesResearched.length) {
     // All nonces found - gain of 3 calls eth_logs to the ethereum rpc
+    console.log("all nonces have been found for events - gain of 3 calls eth_logs to the ethereum rpc")
     return newEvents
   }
 
   // 3. ETFCreated events
-  const etfCreatedEvents = (
-    await client.getLogs({
-      address: contractAddress,
-      fromBlock,
-      toBlock,
-      events: parseAbi([
-        "event ETFCreated(address indexed vault, uint256 eventNonce, uint256 eventHeight, uint256 etfNonce, address shareToken, string name, string symbol)",
-      ]),
-    })
-  ).filter((log: any) => (log.args.eventNonce ?? 0n) > lastNonce)
+  const etfCreatedEvents = await client.getLogs({
+    address: contractAddress,
+    fromBlock,
+    toBlock,
+    events: parseAbi([
+      "event ETFCreated(address indexed vault, uint256 eventNonce, uint256 eventHeight, uint256 etfNonce, address shareToken, string name, string symbol)",
+    ]),
+  })
 
   for (const log of etfCreatedEvents) {
-    newEvents.push(log as EventLog)
-    const nonce = (log as any).args.eventNonce ?? 0n
-    if (nonce > lastNonce && noncesResearched.has(nonce)) {
-      noncesFound.add(nonce)
+    const ev = log as EventLog
+    newEvents.push(ev)
+    const nonce = ev.args.eventNonce ?? ev.args.nonce ?? 0n
+    if (nonce > lastNonce && noncesResearched.includes(nonce)) {
+      noncesFound.push(nonce)
     }
   }
 
-  if (noncesFound.size === noncesResearched.size) {
+  if (noncesFound.length === noncesResearched.length) {
     // All nonces found - gain of 2 calls eth_logs to the ethereum rpc
+    console.log("all nonces have been found for events - gain of 2 calls eth_logs to the ethereum rpc")
     return newEvents
   }
 
   // 4. Rebalance events
-  const rebalanceEvents = (
-    await client.getLogs({
-      address: contractAddress,
-      fromBlock,
-      toBlock,
-      events: parseAbi([
-        "event Rebalance(address indexed vault, uint256 fromIndex, uint256 toIndex, uint256 moveValue, uint256 eventNonce, uint256 eventHeight, uint256 bought)",
-      ]),
-    })
-  ).filter((log: any) => (log.args.eventNonce ?? 0n) > lastNonce)
+  const rebalanceEvents = await client.getLogs({
+    address: contractAddress,
+    fromBlock,
+    toBlock,
+    events: parseAbi([
+      "event Rebalance(address indexed vault, uint256 fromIndex, uint256 toIndex, uint256 moveValue, uint256 eventNonce, uint256 eventHeight, uint256 bought)",
+    ]),
+  })
 
   for (const log of rebalanceEvents) {
-    newEvents.push(log as EventLog)
-    const nonce = (log as any).args.eventNonce ?? 0n
-    if (nonce > lastNonce && noncesResearched.has(nonce)) {
-      noncesFound.add(nonce)
+    const ev = log as EventLog
+    newEvents.push(ev)
+    const nonce = ev.args.eventNonce ?? ev.args.nonce ?? 0n
+    if (nonce > lastNonce && noncesResearched.includes(nonce)) {
+      noncesFound.push(nonce)
     }
   }
 
-  if (noncesFound.size === noncesResearched.size) {
+  if (noncesFound.length === noncesResearched.length) {
     // All nonces found - gain of 1 call eth_logs to the ethereum rpc
+    console.log("all nonces have been found for events - gain of 1 call eth_logs to the ethereum rpc")
     return newEvents
   }
 
   // 5. ParamsUpdated events
-  const paramsUpdatedEvents = (
-    await client.getLogs({
-      address: contractAddress,
-      fromBlock,
-      toBlock,
-      events: parseAbi([
-        "event ParamsUpdated(address indexed vault, uint256 imbalanceThresholdBps, uint256 maxPriceStaleness, uint256 eventNonce, uint256 eventHeight)",
-      ]),
-    })
-  ).filter((log: any) => (log.args.eventNonce ?? 0n) > lastNonce)
+  const paramsUpdatedEvents = await client.getLogs({
+    address: contractAddress,
+    fromBlock,
+    toBlock,
+    events: parseAbi([
+      "event ParamsUpdated(address indexed vault, uint256 imbalanceThresholdBps, uint256 maxPriceStaleness, uint256 eventNonce, uint256 eventHeight)",
+    ]),
+  })
 
   for (const log of paramsUpdatedEvents) {
-    newEvents.push(log as EventLog)
+    const ev = log as EventLog
+    newEvents.push(ev)
   }
 
   return newEvents
@@ -786,129 +813,145 @@ async function updateETFPortfolio(
 }
 
 /**
- * Observe and process lending events for a specific chain
+ * Sync to target height following Go code pattern exactly
  */
-async function observeEvents(chainId: ChainId, client: PublicClient): Promise<void> {
-  if (DEFAULT_START_BLOCKS[chainId] == 0n) return
-
-  // Get or create observe progress for this chain
-  let observeProgress = await ObserveEvents.findOne({ chain: Number(chainId) })
-  
-  // Get last event for nonce tracking
-  const lastEventObserved = await Event.findOne({
-    chain: Number(chainId),
-  }).sort({ blockNumber: -1, nonce: -1 })
-
-  // Determine starting block number
-  let fromBlock: bigint
-  if (observeProgress) {
-    // Use saved progress (toBlock from last run becomes fromBlock)
-    fromBlock = observeProgress.lastBlockNumber
-    console.log("fromBlock", fromBlock)
-  } else {
-    // First time: use last event block or default start block
-    fromBlock = lastEventObserved?.blockNumber ?? DEFAULT_START_BLOCKS[chainId]
-    console.log("fromBlock", fromBlock)
-    console.log("lastEventObserved", lastEventObserved)
-    console.log("DEFAULT_START_BLOCKS[chainId]", DEFAULT_START_BLOCKS[chainId])
+async function syncToTargetHeight(
+  chainId: ChainId,
+  client: PublicClient,
+  lastObservedEthHeight: bigint,
+  targetHeight: bigint,
+  latestHeight: bigint,
+  ethBlockConfirmationDelay: bigint
+): Promise<{ lastObservedEthHeight: bigint; error?: Error }> {
+  if (targetHeight - lastObservedEthHeight === 0n) {
+    console.log("No blocks to sync", "last_observed_eth_height", lastObservedEthHeight, "latest_height", latestHeight, "target_height", targetHeight)
+    return { lastObservedEthHeight: targetHeight }
   }
 
-  const lastEventObservedNonce = lastEventObserved?.nonce ?? 0n
+  // Get last observed event nonce from ObserveEvents (source of truth, like Helios in Go code)
+  const observeProgress = await ObserveEvents.findOne({ chain: Number(chainId) })
+  const lastObservedEventNonce = observeProgress?.lastNonce ?? 0n
 
-  // Get latest block number to avoid going beyond the chain
-  const latestBlock = await client.getBlockNumber()
-
-  const latestEventNonce = await client.readContract({
-    address: ETF_CONTRACT_ADDRS[chainId] as `0x${string}`,
-    abi: parseAbi(["function state_lastEventNonce() view returns (uint256)"]),
-    functionName: "state_lastEventNonce",
-  })
-
-  const latestEventHeight = await client.readContract({
-    address: ETF_CONTRACT_ADDRS[chainId] as `0x${string}`,
-    abi: parseAbi(["function state_lastEventHeight() view returns (uint256)"]),
-    functionName: "state_lastEventHeight",
-  })
-
-  console.log("latestEventNonce", latestEventNonce)
-  console.log("latestEventHeight", latestEventHeight)
-
-  // Calculate toBlock but don't exceed latest block
-  const calculatedToBlock = fromBlock + GET_LOGS_BLOCKS[chainId]
-  const toBlock = calculatedToBlock > latestBlock ? latestBlock : calculatedToBlock
-
-  // If we're already at the latest block, don't process
-  if (fromBlock >= latestBlock) {
-    console.log(
-      `Chain ${chainId} already at latest block ${latestBlock}, fromBlock: ${fromBlock}`
-    )
-    return
+  // Get latest event nonce from contract
+  let latestEventNonce: bigint
+  try {
+    latestEventNonce = await client.readContract({
+      address: ETF_CONTRACT_ADDRS[chainId] as `0x${string}`,
+      abi: parseAbi(["function state_lastEventNonce() view returns (uint256)"]),
+      functionName: "state_lastEventNonce",
+    }) as bigint
+  } catch (error: any) {
+    if (error?.message?.includes("no contract code")) {
+      console.error("No contract code at given address, rotating RPC might be needed")
+    }
+    console.error("failed to get last event nonce on chain", chainId, error)
+    return { lastObservedEthHeight, error: error as Error }
   }
 
-  if (latestEventNonce <= lastEventObservedNonce) {
-    console.log("latestEventNonce <= lastEventObservedNonce", latestEventNonce, lastEventObservedNonce)
-    console.log("No new events to process for chain", chainId, "range", fromBlock, toBlock)
-    // Still save progress even if no new events, but don't exceed latest block
-    const savedToBlock = toBlock >= latestBlock ? latestBlock : toBlock
-    await ObserveEvents.findOneAndUpdate(
-      { chain: Number(chainId) },
-      {
-        chain: Number(chainId),
-        lastBlockNumber: savedToBlock,
-        lastNonce: lastEventObservedNonce,
-      },
-      { upsert: true }
-    )
-    return
+  // Skip optimization: if nonces match, skip RPC calls
+  if (!missedEventsBlockHeight.has(chainId) || missedEventsBlockHeight.get(chainId) === 0n) {
+    if (lastObservedEventNonce === latestEventNonce) {
+      console.log("lastObservedEventNonce is equal to latestEventNonce, no new events to process")
+      return { lastObservedEthHeight: targetHeight }
+    } else {
+      // Special case to reduce the number of calls to the ethereum rpc
+      // We can miss events if we don't rewind few minutes
+      // blockTimeOnTheChain is in milliseconds
+      const blockTimeOnTheChain = AVERAGE_BLOCK_TIME_MS[chainId]
+
+      // compute number of blocks in 2 minutes
+      const twoMinutesMs = 2n * 60n * 1000n // 120000 ms
+
+      const nbBlocksToRewind = twoMinutesMs / blockTimeOnTheChain
+
+      console.log("rewinding the last observed height by", nbBlocksToRewind, "blocks")
+      // rewind the last observed height
+      lastObservedEthHeight = lastObservedEthHeight > nbBlocksToRewind 
+        ? lastObservedEthHeight - nbBlocksToRewind 
+        : 0n
+    }
   }
 
-  // Get all nonces between lastNonce and latestEventNonce to optimize RPC calls
-  const noncesResearched = getNoncesResearched(lastEventObservedNonce, latestEventNonce)
+  // Get all nonces between lastObservedEventNonce and latestEventNonce to optimize the number of calls to the ethereum rpc
+  const noncesResearched = getNoncesResearched(lastObservedEventNonce, latestEventNonce)
+
+  console.log("noncesResearched:", noncesResearched)
 
   const contractAddress = ETF_CONTRACT_ADDRS[chainId] as `0x${string}`
 
-  console.log("noncesResearched", noncesResearched)
   // Get events from blockchain
-  const newEvents = await getFactoryEvents(
-    client,
-    contractAddress,
-    fromBlock,
-    toBlock,
-    lastEventObservedNonce,
-    noncesResearched
-  )
+  let events: EventLog[]
+  try {
+    events = await getFactoryEvents(
+      client,
+      contractAddress,
+      lastObservedEthHeight,
+      targetHeight,
+      lastObservedEventNonce,
+      noncesResearched
+    )
+  } catch (error) {
+    console.error("failed to get events on chain", chainId, error)
+    return { lastObservedEthHeight, error: error as Error }
+  }
 
-  console.log("newEvents", newEvents, fromBlock, toBlock)
+  console.log("events Before Filter", events.length)
+  const newEvents = filterEvents(events, lastObservedEventNonce)
+  console.log("newEvents:", newEvents.length)
 
-  // Sort events by eventNonce (or nonce) first, then by blockNumber to ensure correct order
+  // Sort events by nonce
   newEvents.sort((a, b) => {
     const nonceA = a.args.eventNonce ?? a.args.nonce ?? 0n
     const nonceB = b.args.eventNonce ?? b.args.nonce ?? 0n
-    if (nonceA !== nonceB) {
-      return nonceA < nonceB ? -1 : 1
-    }
-    // If nonces are equal, sort by blockNumber
-    return a.blockNumber < b.blockNumber ? -1 : a.blockNumber > b.blockNumber ? 1 : 0
+    return nonceA < nonceB ? -1 : nonceA > nonceB ? 1 : 0
   })
 
   if (newEvents.length === 0) {
-    // Save progress even if no events found (to advance the block range)
-    // But don't exceed latest block (reuse latestBlock from above)
-    const savedToBlock = toBlock >= latestBlock ? latestBlock : toBlock
-    await ObserveEvents.findOneAndUpdate(
-      { chain: Number(chainId) },
-      {
-        chain: Number(chainId),
-        lastBlockNumber: savedToBlock,
-        lastNonce: lastEventObservedNonce,
-      },
-      { upsert: true }
-    )
-    console.log(
-      `No events found for chain ${chainId}, advanced to block ${savedToBlock} (latest: ${latestBlock})`
-    )
-    return
+    console.log("oracle no new events on chain", chainId, "eth_block_start", lastObservedEthHeight, "eth_block_end", targetHeight)
+    return { lastObservedEthHeight: targetHeight }
   }
+
+  if (newEvents.length > 0) {
+    console.log("SOME EVENTS DETECTED", newEvents.length)
+  }
+
+  // Check for missed events (nonce gap detection)
+  const firstEventNonce = newEvents[0].args.eventNonce ?? newEvents[0].args.nonce ?? 0n
+  if (firstEventNonce > lastObservedEventNonce + 1n) {
+    // we missed an event
+    const observeProgress = await ObserveEvents.findOne({ chain: Number(chainId) })
+    const lastObservedHeight = observeProgress?.lastBlockNumber ?? DEFAULT_START_BLOCKS[chainId]
+
+    // if we missed an event, we need to rewind the last observed height by 5 minutes and continue from there
+    if (!missedEventsBlockHeight.has(chainId) || missedEventsBlockHeight.get(chainId) === 0n) {
+      missedEventsBlockHeight.set(chainId, lastObservedHeight)
+    } else {
+      // blockTimeOnTheChain is in milliseconds
+      const blockTimeOnTheChain = AVERAGE_BLOCK_TIME_MS[chainId]
+
+      // compute number of blocks in 5 minutes
+      const fiveMinutesMs = 5n * 60n * 1000n // 300000 ms
+
+      const nbBlocksToRewind = fiveMinutesMs / blockTimeOnTheChain
+
+      const currentMissedHeight = missedEventsBlockHeight.get(chainId) ?? lastObservedHeight
+      missedEventsBlockHeight.set(chainId, currentMissedHeight > nbBlocksToRewind 
+        ? currentMissedHeight - nbBlocksToRewind 
+        : 0n)
+    }
+
+    const rewindHeight = missedEventsBlockHeight.get(chainId) ?? lastObservedHeight
+    console.log("orchestrator missed an event on chain", chainId, ". Restarting block search from last observed claim...", {
+      current_helios_nonce: lastObservedEventNonce,
+      wanted_nonce: lastObservedEventNonce + 1n,
+      actual_ethereum_nonce: firstEventNonce,
+      rewind_height: rewindHeight
+    })
+    return { lastObservedEthHeight: rewindHeight, error: new Error("missed an event") }
+  }
+
+  // Clear missed events block height since we found events in sequence
+  missedEventsBlockHeight.set(chainId, 0n)
 
   // Collect all unique wallet addresses
   const walletAddresses = new Set<string>()
@@ -929,12 +972,120 @@ async function observeEvents(chainId: ChainId, client: PublicClient): Promise<vo
   }
 
   // Process all events one by one, saving each immediately
-  // This ensures we don't lose progress if the program is interrupted
-  await processEvents(newEvents, chainId, client, holdingsMap, existingWalletSet, latestBlock)
+  await processEvents(newEvents, chainId, client, holdingsMap, existingWalletSet, latestHeight)
+
+  return { lastObservedEthHeight: targetHeight }
+}
+
+/**
+ * Observe and process lending events for a specific chain
+ * Following Go code pattern exactly
+ */
+async function observeEvents(chainId: ChainId, client: PublicClient): Promise<void> {
+  if (DEFAULT_START_BLOCKS[chainId] == 0n) return
+
+  // Get or create observe progress for this chain
+  let observeProgress = await ObserveEvents.findOne({ chain: Number(chainId) })
+  
+  // Get last event for nonce tracking
+  const lastEventObserved = await Event.findOne({
+    chain: Number(chainId),
+  }).sort({ blockNumber: -1, nonce: -1 })
+
+  // Determine starting block number (lastObservedEthHeight)
+  let lastObservedEthHeight: bigint
+  if (observeProgress) {
+    // Use saved progress
+    lastObservedEthHeight = observeProgress.lastBlockNumber
+  } else {
+    // First time: use last event block or default start block
+    lastObservedEthHeight = lastEventObserved?.blockNumber ?? DEFAULT_START_BLOCKS[chainId]
+  }
+
+  // Get latest block number
+  let latestHeight: bigint
+  try {
+    latestHeight = await client.getBlockNumber()
+  } catch (error) {
+    console.error("failed to get latest height on chain", chainId, error)
+    return
+  }
+
+  // Ensure that latest block has minimum confirmations
+  const ethBlockConfirmationDelay = ETH_BLOCK_CONFIRMATION_DELAY
+  let targetHeight = latestHeight
+
+  // not enough blocks on ethereum yet
+  if (targetHeight <= ethBlockConfirmationDelay) {
+    console.log("not enough blocks on chain", chainId)
+    return
+  }
+
+  // ensure that latest block has minimum confirmations
+  targetHeight = targetHeight - ethBlockConfirmationDelay
+  
+  if (targetHeight <= lastObservedEthHeight) {
+    console.log("Synced", lastObservedEthHeight, "to", targetHeight)
+    return
+  }
+
+  // Sync in chunks following Go code pattern
+  const defaultBlocksToSearch = DEFAULT_BLOCKS_TO_SEARCH
+  let targetHeightForSync = targetHeight
+
+  for (let i = 0; i < 100 && latestHeight > targetHeightForSync; i++) {
+    if (targetHeightForSync > lastObservedEthHeight + defaultBlocksToSearch) {
+      targetHeightForSync = lastObservedEthHeight + defaultBlocksToSearch
+    }
+
+    const result = await syncToTargetHeight(
+      chainId,
+      client,
+      lastObservedEthHeight,
+      targetHeightForSync,
+      latestHeight,
+      ethBlockConfirmationDelay
+    )
+
+    if (result.error) {
+      if (result.error.message === "missed an event") {
+        // Restart from rewinded height
+        lastObservedEthHeight = result.lastObservedEthHeight
+        // Continue the loop to retry
+        continue
+      } else {
+        // Other errors, return
+        console.error("Error in syncToTargetHeight:", result.error)
+        return
+      }
+    }
+
+    lastObservedEthHeight = result.lastObservedEthHeight
+    targetHeightForSync = targetHeightForSync + defaultBlocksToSearch
+  }
+
+  // Save progress to database
+  const finalLastEvent = await Event.findOne({
+    chain: Number(chainId),
+  }).sort({ blockNumber: -1, nonce: -1 })
+  
+  const finalNonce = finalLastEvent?.nonce ?? 0n
+  const savedToBlock = lastObservedEthHeight >= latestHeight ? latestHeight : lastObservedEthHeight
+
+  await ObserveEvents.findOneAndUpdate(
+    { chain: Number(chainId) },
+    {
+      chain: Number(chainId),
+      lastBlockNumber: savedToBlock,
+      lastNonce: finalNonce,
+    },
+    { upsert: true }
+  )
 }
 
 // Mutex to prevent concurrent execution of the cron job
 let isRunning = false
+let startup = false
 
 new CronJob(
   "*/12 * * * * *",
@@ -947,6 +1098,33 @@ new CronJob(
 
     // Set mutex flag
     isRunning = true
+
+
+
+    if (!startup) { // Only run once on startup (to advance the last observed height if no new events were found)
+      startup = true
+      for (const [chainId, client] of Object.entries(publicClients)) {
+        let observeProgress = await ObserveEvents.findOne({ chain: Number(chainId) })
+        if (!observeProgress) {
+          continue
+        }
+        const lastEventNonce = await client.readContract({
+          address: ETF_CONTRACT_ADDRS[Number(chainId) as ChainId] as `0x${string}`,
+          abi: parseAbi(["function state_lastEventNonce() view returns (uint256)"]),
+          functionName: "state_lastEventNonce",
+        }) as bigint
+
+        if (lastEventNonce <= observeProgress.lastNonce) {
+          let latestObservedHeight = await client.getBlockNumber()
+          ObserveEvents.findOneAndUpdate({ chain: Number(chainId) }, {
+            $set: {
+              lastBlockNumber: latestObservedHeight,
+              lastNonce: lastEventNonce,
+            },
+          }, { upsert: true })
+        }
+      }
+    }
 
     try {
       await Promise.all(
