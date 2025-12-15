@@ -1,5 +1,36 @@
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+# Production overrides for docker-compose.yml
 
 services:
   redis:
+    # Ensure Redis ports are not exposed in production
     ports: []
+    # Resource limits for production
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    # Security: run as non-root user (redis image already does this)
+    # Additional security: disable dangerous commands in production
+    command: >
+      redis-server
+      --appendonly yes
+      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+      --protected-mode yes
+      --rename-command FLUSHDB ""
+      --rename-command FLUSHALL ""
+      --rename-command CONFIG ""
+      --rename-command SHUTDOWN SHUTDOWN_PROD
+    # Restart policy for production
+    restart: always
+    # Health check configuration
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

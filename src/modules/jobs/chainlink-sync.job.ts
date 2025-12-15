@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CacheService } from '../../infrastructure/cache/cache.service';
 import {
   ChainlinkDataFeed,
   ChainlinkDataFeedDocument,
@@ -45,99 +45,13 @@ interface ChainlinkFeed {
 }
 
 @Injectable()
-export class ChainlinkDataFeedsService {
-  private readonly logger = new Logger(ChainlinkDataFeedsService.name);
+export class ChainlinkSyncJob {
+  private readonly logger = new Logger(ChainlinkSyncJob.name);
 
   constructor(
     @InjectModel(ChainlinkDataFeed.name)
     private chainlinkDataFeedModel: Model<ChainlinkDataFeedDocument>,
-    private readonly cacheService: CacheService,
   ) {}
-
-  async getAll(
-    page: number,
-    size: number,
-    chainId?: number,
-    feedCategory?: string,
-    feedType?: string,
-    status?: string,
-  ) {
-    // Validate pagination parameters
-    if (page < 1) {
-      throw new Error('Page must be greater than 0');
-    }
-
-    if (size < 1 || size > 100) {
-      throw new Error('Size must be between 1 and 100');
-    }
-
-    // Build query filters
-    const query: any = {};
-    if (chainId !== undefined) {
-      query.sourceChain = chainId;
-    }
-    if (feedCategory) {
-      query.feedCategory = feedCategory;
-    }
-    if (feedType) {
-      query.feedType = feedType;
-    }
-    if (status) {
-      query.status = status;
-    }
-
-    // Calculate skip value
-    const skip = (page - 1) * size;
-
-    // Get total count for pagination metadata
-    const total = await this.chainlinkDataFeedModel.countDocuments(query);
-
-    // Fetch feeds with pagination
-    const feeds = await this.chainlinkDataFeedModel
-      .find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(size)
-      .lean()
-      .exec();
-
-    // Calculate pagination metadata
-    const totalPages = Math.ceil(total / size);
-    const hasNextPage = page < totalPages;
-    const hasPreviousPage = page > 1;
-
-    return {
-      success: true,
-      data: feeds,
-      pagination: {
-        page,
-        size,
-        total,
-        totalPages,
-        hasNextPage,
-        hasPreviousPage,
-      },
-    };
-  }
-
-  async reloadFeeds() {
-    this.logger.log('[Chainlink Reload] Manual sync triggered via API');
-
-    try {
-      await this.syncChainlinkFeeds();
-
-      // Invalidate cache after reload
-      await this.cacheService.delPattern('feeds:*', { namespace: 'chainlink' });
-
-      return {
-        success: true,
-        message: 'Chainlink feeds synchronization completed successfully',
-      };
-    } catch (error) {
-      this.logger.error('[Chainlink Reload] Error during manual sync:', error);
-      throw error;
-    }
-  }
 
   /**
    * Fetch feeds from the API
@@ -163,14 +77,10 @@ export class ChainlinkDataFeedsService {
     url: string,
   ): Promise<void> {
     try {
-      this.logger.log(
-        `[Chainlink Sync] Starting sync for chain ${chainId} from ${url}`,
-      );
+      this.logger.log(`Starting Chainlink sync for chain ${chainId}`);
 
       const feeds = await this.fetchFeeds(url);
-      this.logger.log(
-        `[Chainlink Sync] Fetched ${feeds.length} feeds for chain ${chainId}`,
-      );
+      this.logger.debug(`Fetched ${feeds.length} feeds for chain ${chainId}`);
 
       let addedCount = 0;
       let skippedCount = 0;
@@ -188,37 +98,36 @@ export class ChainlinkDataFeedsService {
 
           if (existingFeed) {
             // Update existing feed
-            await this.chainlinkDataFeedModel.updateOne(
-              { proxyAddress: feed.proxyAddress },
-              {
-                $set: {
-                  compareOffchain: feed.compareOffchain || '',
-                  contractAddress: feed.contractAddress || '',
-                  contractType: feed.contractType || '',
-                  contractVersion: feed.contractVersion ?? 0,
-                  decimalPlaces: feed.decimalPlaces,
-                  ens: feed.ens,
-                  formatDecimalPlaces: feed.formatDecimalPlaces,
-                  history: feed.history,
-                  multiply: feed.multiply || '',
-                  name: feed.name || '',
-                  pair: feed.pair || [],
-                  path: feed.path || '',
-                  proxyAddress: feed.proxyAddress,
-                  threshold: feed.threshold ?? 0,
-                  valuePrefix: feed.valuePrefix || '',
-                  assetName: feed.assetName || '',
-                  feedCategory: feed.feedCategory || '',
-                  feedType: feed.feedType || '',
-                  docs: feed.docs || {},
-                  decimals: feed.decimals ?? 0,
-                  sourceChain: feed.sourceChain || chainId,
-                  status: feed.status || '',
-                  oracles: feed.oracles || [],
-                  heartbeat: feed.heartbeat,
-                },
+            const updateQuery = { proxyAddress: feed.proxyAddress };
+
+            await this.chainlinkDataFeedModel.updateOne(updateQuery, {
+              $set: {
+                compareOffchain: feed.compareOffchain || '',
+                contractAddress: feed.contractAddress || '',
+                contractType: feed.contractType || '',
+                contractVersion: feed.contractVersion ?? 0,
+                decimalPlaces: feed.decimalPlaces,
+                ens: feed.ens,
+                formatDecimalPlaces: feed.formatDecimalPlaces,
+                history: feed.history,
+                multiply: feed.multiply || '',
+                name: feed.name || '',
+                pair: feed.pair || [],
+                path: feed.path || '',
+                proxyAddress: feed.proxyAddress,
+                threshold: feed.threshold ?? 0,
+                valuePrefix: feed.valuePrefix || '',
+                assetName: feed.assetName || '',
+                feedCategory: feed.feedCategory || '',
+                feedType: feed.feedType || '',
+                docs: feed.docs || {},
+                decimals: feed.decimals ?? 0,
+                sourceChain: feed.sourceChain || chainId,
+                status: feed.status || '',
+                oracles: feed.oracles || [],
+                heartbeat: feed.heartbeat,
               },
-            );
+            });
             skippedCount++;
           } else {
             // Insert new feed
@@ -255,8 +164,8 @@ export class ChainlinkDataFeedsService {
         } catch (error) {
           const identifier =
             feed.feedId || `${feed.path}-${feed.sourceChain || chainId}`;
-          this.logger.error(
-            `[Chainlink Sync] Error processing feed ${feed.name} (${identifier}):`,
+          this.logger.warn(
+            `Error processing feed ${feed.name} (${identifier}):`,
             error,
           );
           skippedCount++;
@@ -264,22 +173,22 @@ export class ChainlinkDataFeedsService {
       }
 
       this.logger.log(
-        `[Chainlink Sync] Chain ${chainId} sync completed: ${addedCount} added, ${skippedCount} skipped/updated`,
+        `Chainlink sync completed for chain ${chainId}: ${addedCount} added, ${skippedCount} updated`,
       );
     } catch (error) {
       this.logger.error(
-        `[Chainlink Sync] Error processing feeds for chain ${chainId}:`,
+        `Error processing feeds for chain ${chainId}:`,
         error,
       );
-      throw error;
     }
   }
 
   /**
    * Main function to sync all Chainlink feeds
    */
+  @Cron('0 0 0 * * *') // Every day at midnight
   async syncChainlinkFeeds(): Promise<void> {
-    this.logger.log('[Chainlink Sync] Starting daily sync of Chainlink feeds');
+    this.logger.log('Starting daily Chainlink feeds sync');
 
     try {
       // Process Ethereum feeds
@@ -288,10 +197,34 @@ export class ChainlinkDataFeedsService {
       // Process Arbitrum feeds
       await this.processFeedsForChain(ARBITRUM_CHAIN_ID, ARBITRUM_FEEDS_URL);
 
-      this.logger.log('[Chainlink Sync] Daily sync completed successfully');
+      this.logger.log('Daily sync completed successfully');
     } catch (error) {
-      this.logger.error('[Chainlink Sync] Error during daily sync:', error);
-      throw error;
+      // Enhanced error handling for MongoDB and other errors
+      if (error instanceof Error) {
+        const errorMessage = error.message.toLowerCase();
+        if (
+          errorMessage.includes('mongodb') ||
+          errorMessage.includes('connection') ||
+          errorMessage.includes('timeout') ||
+          errorMessage.includes('network')
+        ) {
+          this.logger.error(
+            `MongoDB error in Chainlink sync job: ${error.message}`,
+            error.stack,
+          );
+          // Don't throw, job will retry on next execution
+        } else {
+          this.logger.error(
+            `Error in Chainlink sync job: ${error.message}`,
+            error.stack,
+          );
+          // For non-MongoDB errors, still don't throw to prevent job from crashing
+          // The job will retry on next cron execution
+        }
+      } else {
+        this.logger.error('Unknown error in Chainlink sync job:', error);
+      }
+      // Job will continue on next cron execution
     }
   }
 }

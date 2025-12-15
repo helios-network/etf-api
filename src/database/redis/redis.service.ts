@@ -1,8 +1,10 @@
-import { Injectable, Inject, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Inject, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
 
 @Injectable()
-export class RedisService implements OnModuleDestroy {
+export class RedisService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(RedisService.name);
+
   constructor(@Inject('REDIS_CLIENT') private readonly redisClient: Redis) {}
 
   async get<T>(key: string): Promise<T | null> {
@@ -34,6 +36,23 @@ export class RedisService implements OnModuleDestroy {
 
   getClient(): Redis {
     return this.redisClient;
+  }
+
+  async onModuleInit() {
+    // Verify Redis connection on startup
+    try {
+      const result = await this.redisClient.ping();
+      if (result === 'PONG') {
+        this.logger.log('Redis connection verified successfully');
+      } else {
+        this.logger.warn('Redis ping returned unexpected result:', result);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Redis connection verification failed: ${error instanceof Error ? error.message : 'Unknown error'}. ` +
+          'Application will continue with fail-open behavior for rate limiting.',
+      );
+    }
   }
 
   async onModuleDestroy() {

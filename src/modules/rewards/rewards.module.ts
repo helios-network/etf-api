@@ -1,10 +1,23 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
 import { RewardsController } from './rewards.controller';
 import { RewardsService } from './rewards.service';
+import { WalletHolding, WalletHoldingSchema } from '../../models/wallet-holding.schema';
+import {
+  LeaderBoardRewards,
+  LeaderBoardRewardsSchema,
+} from '../../models/leader-board-rewards.schema';
+import { Web3Service } from '../../services/web3.service';
 
 @Module({
+  imports: [
+    MongooseModule.forFeature([
+      { name: WalletHolding.name, schema: WalletHoldingSchema },
+      { name: LeaderBoardRewards.name, schema: LeaderBoardRewardsSchema },
+    ]),
+  ],
   controllers: [RewardsController],
-  providers: [RewardsService],
+  providers: [RewardsService, Web3Service],
   exports: [RewardsService],
 })
 export class RewardsModule {}

@@ -2,8 +2,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: etf_redis
+    # Only expose Redis port if explicitly enabled (default: false for security)
     ports:
-      - "${EXPOSE_REDIS_PORT:-true}:6379"
+      - "${EXPOSE_REDIS_PORT:-false}:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}

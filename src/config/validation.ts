@@ -19,5 +19,22 @@ export const validationSchema = Joi.object({
     .valid('true', 'false', '1', '0')
     .optional(),
   CORS_ORIGINS: Joi.string().optional(),
+  RATE_LIMIT_ENABLED: Joi.string()
+    .valid('true', 'false', '1', '0')
+    .default('true'),
+  RATE_LIMIT_WINDOW_MS: Joi.number().min(1000).default(60000),
+  RATE_LIMIT_MAX_REQUESTS: Joi.number().min(1).default(100),
+  RATE_LIMIT_NAMESPACE: Joi.string().default('ratelimit'),
+  PRIVATE_KEY: Joi.string()
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.string().required().messages({
+        'any.required': 'PRIVATE_KEY is required in production for reward claims',
+      }),
+      otherwise: Joi.string().optional(),
+    }),
+  DEBUG_TVL: Joi.string()
+    .valid('true', 'false', '1', '0')
+    .optional(),
 });
 

@@ -7,6 +7,7 @@ import {
   MongooseHealthIndicator,
 } from '@nestjs/terminus';
 import { RedisService } from '../../database/redis/redis.service';
+import { BypassRateLimit } from '../../infrastructure/rate-limit/rate-limit.guard';
 
 @Controller('health')
 export class HealthController {
@@ -18,6 +19,7 @@ export class HealthController {
 
   @Get()
   @HealthCheck()
+  @BypassRateLimit()
   check(): Promise<HealthCheckResult> {
     return this.health.check([
       () => this.mongoose.pingCheck('mongodb'),

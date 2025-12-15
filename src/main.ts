@@ -27,6 +27,14 @@ async function bootstrap() {
   if (corsConfig?.enabled !== false) {
     const corsOrigins = corsConfig?.origins || (nodeEnv === 'production' ? [] : '*');
     
+    // Warn in production if CORS_ORIGINS is not explicitly set
+    if (nodeEnv === 'production' && !corsConfig?.origins) {
+      logger.warn(
+        'WARNING: CORS_ORIGINS is not set in production. CORS is disabled (empty array). ' +
+          'If you need CORS, explicitly set CORS_ORIGINS environment variable.',
+      );
+    }
+    
     app.enableCors({
       origin: corsOrigins,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],

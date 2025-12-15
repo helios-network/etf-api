@@ -21,12 +21,22 @@ export interface CorsConfig {
   origins: string[] | string;
 }
 
+export interface RateLimitConfig {
+  enabled: boolean;
+  windowMs: number;
+  maxRequests: number;
+  namespace: string;
+}
+
 export interface AppConfig {
   nodeEnv: string;
   port: number;
   database: DatabaseConfig;
   cache: CacheConfig;
   cors: CorsConfig;
+  rateLimit: RateLimitConfig;
+  privateKey?: string;
+  debugTvl: boolean;
 }
 
 export default (): AppConfig => ({
@@ -63,5 +73,19 @@ export default (): AppConfig => ({
           ? []
           : '*',
   },
+  rateLimit: {
+    enabled:
+      process.env.RATE_LIMIT_ENABLED === 'true' ||
+      process.env.RATE_LIMIT_ENABLED === '1' ||
+      process.env.RATE_LIMIT_ENABLED === undefined,
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
+    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
+    namespace: process.env.RATE_LIMIT_NAMESPACE || 'ratelimit',
+  },
+  privateKey: process.env.PRIVATE_KEY,
+  debugTvl:
+    process.env.DEBUG_TVL === 'true' ||
+    process.env.DEBUG_TVL === '1' ||
+    false,
 });
 
