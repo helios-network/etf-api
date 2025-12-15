@@ -26,9 +26,8 @@ export const validationSchema = Joi.object({
   RATE_LIMIT_MAX_REQUESTS: Joi.number().min(1).default(100),
   RATE_LIMIT_NAMESPACE: Joi.string().default('ratelimit'),
   PRIVATE_KEY: Joi.string()
-    .required().messages({
-      'any.required': 'PRIVATE_KEY is required for reward claims',
-    }),
+    .optional()
+    .allow(''),
   DEBUG_TVL: Joi.string()
     .valid('true', 'false', '1', '0')
     .optional(),

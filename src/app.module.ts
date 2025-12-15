@@ -32,7 +32,7 @@ function shouldLoadJobsModules(): boolean {
       load: [configuration],
       validationSchema,
       validationOptions: {
-        allowUnknown: false,
+        allowUnknown: true,
         abortEarly: false,
       },
     }),
