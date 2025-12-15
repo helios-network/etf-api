@@ -39,38 +39,51 @@ export class EtfsService {
       throw new Error('Size must be between 1 and 100');
     }
 
-    // Calculate skip value
-    const skip = (page - 1) * size;
+    // Build cache key with all parameters that influence the result
+    const cacheKey = `list:page=${page}:size=${size}`;
 
-    // Get total count for pagination metadata
-    const total = await this.etfModel.countDocuments();
+    // Use cache-aside pattern with 60 seconds TTL
+    return await this.cacheService.wrap(
+      cacheKey,
+      async () => {
+        // Calculate skip value
+        const skip = (page - 1) * size;
 
-    // Fetch ETFs with pagination
-    const etfs = await this.etfModel
-      .find()
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(size)
-      .lean()
-      .exec();
+        // Get total count for pagination metadata
+        const total = await this.etfModel.countDocuments();
 
-    // Calculate pagination metadata
-    const totalPages = Math.ceil(total / size);
-    const hasNextPage = page < totalPages;
-    const hasPreviousPage = page > 1;
+        // Fetch ETFs with pagination
+        const etfs = await this.etfModel
+          .find()
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(size)
+          .lean()
+          .exec();
 
-    return {
-      success: true,
-      data: etfs,
-      pagination: {
-        page,
-        size,
-        total,
-        totalPages,
-        hasNextPage,
-        hasPreviousPage,
+        // Calculate pagination metadata
+        const totalPages = Math.ceil(total / size);
+        const hasNextPage = page < totalPages;
+        const hasPreviousPage = page > 1;
+
+        return {
+          success: true,
+          data: etfs,
+          pagination: {
+            page,
+            size,
+            total,
+            totalPages,
+            hasNextPage,
+            hasPreviousPage,
+          },
+        };
       },
-    };
+      {
+        namespace: 'etfs',
+        ttl: 60, // 60 seconds
+      },
+    );
   }
 
   async verifyETF(body: VerifyEtfDto): Promise<VerifyResponse> {
