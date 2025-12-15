@@ -46,8 +46,7 @@ async function middlewareAfterDeposit(
   walletHolding.markModified("tvl")
 
   if (etf.sharePrice != undefined) {
-    const sharePrice = parseFloat(etf.sharePrice)
-    const depositAmountUSD = sharePrice * Number(ethers.parseUnits(shares.toString(), etf.shareDecimals ?? 18).toString())
+    const depositAmountUSD = etf.sharePrice * Number(ethers.parseUnits(shares.toString(), etf.shareDecimals ?? 18).toString())
     const currentVolume = walletHolding.volumeTradedUSD
 
     walletHolding.volumeTradedUSD = Number((currentVolume + depositAmountUSD).toFixed(2))
@@ -74,8 +73,7 @@ async function middlewareAfterRedeem(
   walletHolding.markModified("tvl")
 
   if (etf.sharePrice != undefined) {
-    const sharePrice = parseFloat(etf.sharePrice)
-    const depositAmountUSD = sharePrice * Number(ethers.parseUnits(shares.toString(), etf.shareDecimals ?? 18).toString())
+    const depositAmountUSD = etf.sharePrice * Number(ethers.parseUnits(shares.toString(), etf.shareDecimals ?? 18).toString())
     const currentVolume = walletHolding.volumeTradedUSD
 
     walletHolding.volumeTradedUSD = Number((currentVolume - depositAmountUSD).toFixed(2))
@@ -164,7 +162,7 @@ function createDepositObject(
     etfVaultAddress: etf.vault, // Always set vault address
     etfTokenAddress: etf.shareToken,
     amount: amount,
-    amountUSD: etf.sharePrice ? parseFloat(etf.sharePrice) * Number(ethers.parseUnits(amount.toString(), etf.shareDecimals ?? 18).toString()) : 0,
+    amountUSD: etf.sharePrice ? etf.sharePrice * Number(ethers.parseUnits(amount.toString(), etf.shareDecimals ?? 18).toString()) : 0,
   }
 }
 

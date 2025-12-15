@@ -96,6 +96,8 @@ export async function calculateV2LiquidityUSD(
     }
 
     const reserves = await getV2Reserves(client, pairAddress)
+
+    console.log(reserves)
     if (!reserves) {
       return 0
     }
@@ -126,6 +128,8 @@ export async function calculateV2LiquidityUSD(
       return valueA + valueB
     }
 
+    console.log(tokenAPriceUSD, tokenBPriceUSD)
+
     // Otherwise, use router to quote a swap and estimate
     // Quote swapping 1 tokenA to tokenB, then estimate USD
     const amountIn = BigInt(10 ** tokenADecimals) // 1 token
@@ -142,6 +146,7 @@ export async function calculateV2LiquidityUSD(
 
       // If we have price for tokenB, calculate liquidity
       if (tokenBPriceUSD) {
+        console.log("Token B price available, calculating liquidity")
         const valueA = Number(reserveA) / 10 ** tokenADecimals * priceRatio * tokenBPriceUSD
         const valueB = Number(reserveB) / 10 ** tokenBDecimals * tokenBPriceUSD
         return valueA + valueB
@@ -149,10 +154,13 @@ export async function calculateV2LiquidityUSD(
 
       // If we have price for tokenA
       if (tokenAPriceUSD) {
+        console.log("Token A price available, calculating liquidity")
         const valueA = Number(reserveA) / 10 ** tokenADecimals * tokenAPriceUSD
         const valueB = Number(reserveB) / 10 ** tokenBDecimals / priceRatio * tokenAPriceUSD
         return valueA + valueB
       }
+
+      console.log("No prices available, returning 0")
 
       // No prices available, return 0 (shouldn't happen in normal flow)
       return 0
@@ -163,6 +171,44 @@ export async function calculateV2LiquidityUSD(
   } catch (error) {
     console.error(`Error calculating V2 liquidity:`, error)
     return 0
+  }
+}
+
+/**
+ * Get WETH price in USDC using Uniswap V2
+ * This is used when targetTokenPriceUSD is null or 0
+ */
+async function getWETHPriceInUSDC(client: PublicClient): Promise<number | null> {
+  try {
+    const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as `0x${string}`
+    const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as `0x${string}`
+    const WETH_DECIMALS = 18
+    const USDC_DECIMALS = 6
+
+    // Check if WETH/USDC pool exists
+    const { exists } = await checkV2Pool(client, WETH, USDC)
+    if (!exists) {
+      console.error("WETH/USDC pool does not exist on Uniswap V2")
+      return null
+    }
+
+    // Quote 1 WETH in USDC
+    const amountIn = BigInt(10 ** WETH_DECIMALS) // 1 WETH
+    const amountsOut = await client.readContract({
+      address: UNISWAP_V2_ROUTER as `0x${string}`,
+      abi: V2_ROUTER_ABI,
+      functionName: "getAmountsOut",
+      args: [amountIn, [WETH, USDC]],
+    })
+
+    const amountOut = amountsOut[1] as bigint
+    // Convert to USD price: amountOut is in USDC (6 decimals), so divide by 10^6
+    const wethPriceUSD = Number(amountOut) / 10 ** USDC_DECIMALS
+
+    return wethPriceUSD
+  } catch (error) {
+    console.error("Error getting WETH price in USDC:", error)
+    return null
   }
 }
 
@@ -200,6 +246,10 @@ export async function findV2Path(
   // Try 2-hop path via WETH (most common intermediate token on Ethereum)
   const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as `0x${string}`
   
+  console.log("depositTokenPriceUSD:", depositTokenPriceUSD)
+  if (!depositTokenPriceUSD || depositTokenPriceUSD === 0) {
+    depositTokenPriceUSD = 1;
+  }
   // Check depositToken -> WETH
   const depositToWethLiquidity = await calculateV2LiquidityUSD(
     client,
@@ -211,6 +261,16 @@ export async function findV2Path(
     null // WETH price (we'll estimate)
   )
 
+  // Get WETH price in USDC using Uniswap V2 (needed when targetTokenPriceUSD is null or 0)
+  let wethPrice: number | null = null
+  if (!targetTokenPriceUSD || targetTokenPriceUSD === 0) {
+    wethPrice = await getWETHPriceInUSDC(client)
+    if (!wethPrice) {
+      console.warn("Could not get WETH price in USDC, cannot calculate liquidity for WETH -> targetToken path")
+      // Continue anyway, but liquidity calculation will be limited
+    }
+  }
+
   // Check WETH -> targetToken
   const wethToTargetLiquidity = await calculateV2LiquidityUSD(
     client,
@@ -218,12 +278,14 @@ export async function findV2Path(
     targetToken,
     18, // WETH decimals
     targetTokenDecimals,
-    null, // WETH price
+    wethPrice, // WETH price in USDC
     targetTokenPriceUSD
   )
 
   // Take minimum liquidity of the path
   const twoHopLiquidity = Math.min(depositToWethLiquidity, wethToTargetLiquidity)
+
+  console.log("twoHopLiquidity:", twoHopLiquidity)
 
   if (twoHopLiquidity >= 1000) {
     return {
@@ -232,6 +294,8 @@ export async function findV2Path(
       path: [depositToken, WETH, targetToken],
     }
   }
+
+  console.log("wethToTargetLiquidity:", wethToTargetLiquidity)
 
   return {
     exists: false,

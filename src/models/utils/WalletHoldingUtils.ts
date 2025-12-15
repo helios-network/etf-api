@@ -44,13 +44,8 @@ export async function calculateWalletTVL(
     }
 
     // Parse sharePrice (stored as formatted string)
-    const sharePriceStr = etf.sharePrice
-    if (!sharePriceStr || sharePriceStr === "0" || sharePriceStr === "0.0" || sharePriceStr.trim() === "") {
-      continue
-    }
-
-    const sharePriceUSD = parseFloat(sharePriceStr)
-    if (isNaN(sharePriceUSD) || sharePriceUSD <= 0) {
+    const sharePriceUSD = etf.sharePrice
+    if (sharePriceUSD == undefined || sharePriceUSD <= 0) {
       continue
     }
 

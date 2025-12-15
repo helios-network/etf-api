@@ -20,7 +20,7 @@ export interface IETF extends Document {
   symbol: string
   tvl: string
   volumeTradedUSD: string
-  sharePrice?: string
+  sharePrice?: number
   eventNonce: bigint
   eventHeight: bigint
   etfNonce: bigint
