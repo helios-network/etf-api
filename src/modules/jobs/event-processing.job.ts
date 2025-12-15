@@ -122,8 +122,10 @@ export class EventProcessingJob {
 
     if (etf.sharePrice != undefined) {
       const shareDecimals = etf.shareDecimals ?? 18;
-      const sharesInHumanReadable =
-        Number(shares) / Math.pow(10, shareDecimals);
+      // Convert shares (bigint in base units) to human-readable for volume calculation
+      // Old code: Number(ethers.parseUnits(shares.toString(), shareDecimals).toString())
+      // Since shares is already in base units, we convert to decimal for price calculation
+      const sharesInHumanReadable = Number(shares) / Math.pow(10, shareDecimals);
       const depositAmountUSD = etf.sharePrice * sharesInHumanReadable;
       const currentVolume = walletHolding.volumeTradedUSD;
 
@@ -134,6 +136,16 @@ export class EventProcessingJob {
         walletHolding.volumeTradedUSD = 0;
       }
     }
+
+    // Update ETF total supply
+    // totalSupply is stored as number (base units)
+    // shares is already in base units, so we use it directly
+    await this.etfModel.updateOne(
+      { _id: etf._id },
+      {
+        $inc: { totalSupply: Number(shares) },
+      },
+    );
   }
 
   private async middlewareAfterRedeem(
@@ -153,8 +165,10 @@ export class EventProcessingJob {
 
     if (etf.sharePrice != undefined) {
       const shareDecimals = etf.shareDecimals ?? 18;
-      const sharesInHumanReadable =
-        Number(shares) / Math.pow(10, shareDecimals);
+      // Convert shares (bigint in base units) to human-readable for volume calculation
+      // Old code: Number(ethers.parseUnits(shares.toString(), shareDecimals).toString())
+      // Since shares is already in base units, we convert to decimal for price calculation
+      const sharesInHumanReadable = Number(shares) / Math.pow(10, shareDecimals);
       const depositAmountUSD = etf.sharePrice * sharesInHumanReadable;
       const currentVolume = walletHolding.volumeTradedUSD;
 
@@ -165,6 +179,17 @@ export class EventProcessingJob {
         walletHolding.volumeTradedUSD = 0;
       }
     }
+
+    // Update ETF total supply
+    // totalSupply is stored as number (base units)
+    // shares is already in base units, so we use it directly
+    const newTotalSupply = Math.max(0, (etf.totalSupply ?? 0) - Number(shares));
+    await this.etfModel.updateOne(
+      { _id: etf._id },
+      {
+        $set: { totalSupply: newTotalSupply },
+      },
+    );
   }
 
   /**
@@ -404,6 +429,7 @@ export class EventProcessingJob {
         name: name ?? '',
         symbol: symbol ?? '',
         tvl: 0,
+        totalSupply: 0,
         eventNonce: (eventNonce ?? 0n).toString(),
         eventHeight: (eventHeight ?? 0n).toString(),
         etfNonce: (etfNonce ?? 0n).toString(),
@@ -428,6 +454,7 @@ export class EventProcessingJob {
         name: name ?? '',
         symbol: symbol ?? '',
         tvl: 0,
+        totalSupply: 0,
         eventNonce: (eventNonce ?? 0n).toString(),
         eventHeight: (eventHeight ?? 0n).toString(),
         etfNonce: (etfNonce ?? 0n).toString(),
@@ -886,6 +913,8 @@ export class EventProcessingJob {
           })) ?? [];
 
         // Update ETF
+        // Note: portfolio.totalValue is a string, but tvl in schema is Number
+        // MongoDB will convert string to number automatically
         await this.etfModel.updateOne(
           { _id: etf._id },
           {

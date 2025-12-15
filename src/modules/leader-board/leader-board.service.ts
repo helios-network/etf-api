@@ -115,18 +115,42 @@ export class LeaderBoardService {
     const paginatedEntries = entries.slice(skip, skip + limitNum);
 
     // Convert BigInt values to strings for JSON response
-    const formattedEntries = paginatedEntries.map((entry) => ({
-      rank: entry.rank,
-      address: entry.address,
-      totalPointsAccrued: entry.totalPointsAccrued.toString(),
-      feesGenerated: entry.feesGenerated.toString(),
-      volumeTradedUSD: entry.volumeTradedUSD.toString(),
-      transactionsPerformed: entry.transactionsPerformed,
-      tvl: entry.tvl,
-      avgTransactionSize: entry.avgTransactionSize.toString(),
-      pointsPerTransaction: entry.pointsPerTransaction.toString(),
-      lastActivity: entry.lastActivity ? entry.lastActivity.toISOString() : null,
-    }));
+    // Ensure all numeric values are valid and properly formatted
+    const formattedEntries = paginatedEntries.map((entry) => {
+      // Ensure volumeTradedUSD is always a valid number string
+      const volumeTradedUSD = 
+        entry.volumeTradedUSD != null && 
+        !isNaN(entry.volumeTradedUSD) 
+          ? entry.volumeTradedUSD.toString() 
+          : '0';
+      
+      // Ensure tvl is always a valid number
+      const tvl = 
+        entry.tvl != null && 
+        !isNaN(entry.tvl) 
+          ? entry.tvl 
+          : 0;
+      
+      // Ensure avgTransactionSize is always a valid number string
+      const avgTransactionSize = 
+        entry.avgTransactionSize != null && 
+        !isNaN(entry.avgTransactionSize) 
+          ? entry.avgTransactionSize.toString() 
+          : '0';
+
+      return {
+        rank: entry.rank,
+        address: entry.address,
+        totalPointsAccrued: entry.totalPointsAccrued.toString(),
+        feesGenerated: entry.feesGenerated.toString(),
+        volumeTradedUSD,
+        transactionsPerformed: entry.transactionsPerformed || 0,
+        tvl,
+        avgTransactionSize,
+        pointsPerTransaction: entry.pointsPerTransaction.toString(),
+        lastActivity: entry.lastActivity ? entry.lastActivity.toISOString() : null,
+      };
+    });
 
     return {
       success: true,
@@ -164,8 +188,17 @@ export class LeaderBoardService {
     // Calculate leaderboard entries with TVL for this batch
     const entriesPromises = walletHoldings.map(async (holding) => {
       const totalPointsAccrued = this.calculateTotalPoints(holding.rewards || []);
-      const volumeTradedUSD = holding.volumeTradedUSD || 0;
-      const transactionsPerformed = holding.transactionsPerformed || 0;
+      // Ensure volumeTradedUSD is always a valid number
+      const volumeTradedUSD = 
+        holding.volumeTradedUSD != null && 
+        !isNaN(Number(holding.volumeTradedUSD)) 
+          ? Number(holding.volumeTradedUSD) 
+          : 0;
+      const transactionsPerformed = 
+        holding.transactionsPerformed != null && 
+        !isNaN(Number(holding.transactionsPerformed))
+          ? Number(holding.transactionsPerformed)
+          : 0;
 
       // Calculate average transaction size
       const avgTransactionSize =
@@ -178,7 +211,10 @@ export class LeaderBoardService {
           : 0n;
 
       // Calculate TVL if not set or if deposits exist
-      let tvl = holding.tvl || 0;
+      let tvl = 
+        holding.tvl != null && !isNaN(Number(holding.tvl))
+          ? Number(holding.tvl)
+          : 0;
       if ((!tvl || tvl === 0) && holding.deposits && holding.deposits.length > 0) {
         try {
           // Calculate TVL on the fly (function now fetches ETFs from DB using deposit vault addresses)

@@ -44,6 +44,21 @@ export class EtfController {
     }
   }
 
+  @Get('deposit-tokens')
+  async getDepositTokens() {
+    try {
+      return await this.etfsService.getDepositTokens();
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Post('verify')
   async verifyETF(@Body() body: VerifyEtfDto) {
     try {

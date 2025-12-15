@@ -309,4 +309,61 @@ export class EtfsService {
 
     return successResponse;
   }
+
+  async getDepositTokens() {
+    try {
+      // Get all distinct deposit tokens
+      const depositTokens = await this.etfModel.distinct('depositToken');
+
+      // Filter out empty strings
+      const validDepositTokens = depositTokens.filter(
+        (token) => token && token.trim() !== '',
+      );
+
+      if (validDepositTokens.length === 0) {
+        return {
+          success: true,
+          data: [],
+        };
+      }
+
+      // Get metadata for each deposit token
+      // Use MAINNET as default chain (as in old code)
+      const client = this.web3Service.getPublicClient(ChainId.MAINNET);
+      if (!client) {
+        throw new Error('Mainnet client not available');
+      }
+
+      const depositTokenMetadata = await Promise.all(
+        validDepositTokens.map(async (token) => {
+          try {
+            const metadata = await this.etfResolver.getTokenMetadata(
+              client,
+              token as `0x${string}`,
+            );
+            return metadata;
+          } catch (error) {
+            this.logger.warn(
+              `Failed to fetch metadata for deposit token ${token}:`,
+              error,
+            );
+            // Return basic info if metadata fetch fails
+            return {
+              address: token,
+              symbol: '',
+              decimals: 18,
+            };
+          }
+        }),
+      );
+
+      return {
+        success: true,
+        data: depositTokenMetadata,
+      };
+    } catch (error) {
+      this.logger.error('Error fetching deposit tokens:', error);
+      throw error;
+    }
+  }
 }

@@ -124,7 +124,10 @@ export class VaultUtilsService {
               type: 'tuple[]',
               components: [
                 { name: 'token', type: 'address' },
+                { name: 'feed', type: 'address' },
                 { name: 'targetWeightBps', type: 'uint256' },
+                { name: 'depositPath', type: 'address[]' },
+                { name: 'withdrawPath', type: 'address[]' },
               ],
             },
           ],
@@ -136,7 +139,10 @@ export class VaultUtilsService {
 
     const assets = assetsResults.map((asset: any) => ({
       token: asset.token as string,
+      feed: (asset.feed as string) || '',
       targetWeightBps: Number(asset.targetWeightBps),
+      depositPath: (asset.depositPath as string[]) || [],
+      withdrawPath: (asset.withdrawPath as string[]) || [],
     }));
 
     // Fetch symbol and decimals for each asset token

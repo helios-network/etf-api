@@ -5,10 +5,10 @@ export type ETFDocument = ETF & Document;
 
 export interface AssetConfig {
   token: string;
-  feed?: string;
+  feed: string;
   targetWeightBps: number;
-  depositPath?: string[];
-  withdrawPath?: string[];
+  depositPath: string[];
+  withdrawPath: string[];
   symbol?: string;
   decimals?: number;
   tvl?: string;
@@ -40,6 +40,9 @@ export class ETF {
   @Prop({ type: Number, default: 0 })
   sharePrice?: number;
 
+  @Prop({ type: Number, default: 0 })
+  totalSupply?: number;
+
   @Prop({ type: String, required: true }) // Store BigInt as string
   eventNonce: string;
 
@@ -62,7 +65,10 @@ export class ETF {
     type: [
       {
         token: { type: String, required: true },
+        feed: { type: String, required: true },
         targetWeightBps: { type: Number, required: true },
+        depositPath: { type: [String], required: true },
+        withdrawPath: { type: [String], required: true },
         symbol: { type: String },
         decimals: { type: Number },
         tvl: { type: String },
