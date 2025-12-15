@@ -2,9 +2,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: etf_redis
-    # Only expose Redis port if explicitly enabled (default: false for security)
-    ports:
-      - "${EXPOSE_REDIS_PORT:-false}:6379"
+    # Only expose Redis port if EXPOSE_REDIS_PORT is explicitly set
+    # In production, this should be empty (no port exposure for security)
+    ports: []
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
@@ -15,6 +15,47 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
+      retries: 3
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: etf_api
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=${PORT:-3000}
+      - APP_ROLE=${APP_ROLE:-master}
+      - WORKER_COUNT=${WORKER_COUNT:-3}
+      - MONGODB_URI=${MONGODB_URI}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_TTL=${REDIS_TTL:-3600}
+      - CACHE_ENABLED=${CACHE_ENABLED:-true}
+      - CACHE_TTL=${CACHE_TTL:-300}
+      - CACHE_NAMESPACE=${CACHE_NAMESPACE:-etf_api}
+      - CORS_ENABLED=${CORS_ENABLED:-true}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - RATE_LIMIT_WINDOW_MS=${RATE_LIMIT_WINDOW_MS:-60000}
+      - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS:-100}
+      - RATE_LIMIT_NAMESPACE=${RATE_LIMIT_NAMESPACE:-ratelimit}
+      - PRIVATE_KEY=${PRIVATE_KEY:-}
+      - DEBUG_TVL=${DEBUG_TVL:-false}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - etf_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:${PORT:-3000}/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
       retries: 3
 
 networks:

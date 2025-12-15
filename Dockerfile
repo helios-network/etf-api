@@ -37,13 +37,13 @@ COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
 # Switch to non-root user
 USER nestjs
 
-# Expose port
+# Expose port (will be overridden by docker-compose)
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:${PORT:-3000}/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
-# Start application
-CMD ["node", "dist/main"]
+# Start application with cluster master/worker
+CMD ["node", "dist/bootstrap"]
 

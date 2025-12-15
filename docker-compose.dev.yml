@@ -1,0 +1,8 @@
+# Development overrides for docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  redis:
+    # Expose Redis port for local development/debugging
+    ports:
+      - "6379:6379"

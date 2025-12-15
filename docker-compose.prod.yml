@@ -3,9 +3,7 @@
 
 services:
   redis:
-    # Ensure Redis ports are not exposed in production
     ports: []
-    # Resource limits for production
     deploy:
       resources:
         limits:
@@ -14,8 +12,6 @@ services:
         reservations:
           cpus: '0.5'
           memory: 256M
-    # Security: run as non-root user (redis image already does this)
-    # Additional security: disable dangerous commands in production
     command: >
       redis-server
       --appendonly yes
@@ -25,12 +21,28 @@ services:
       --rename-command FLUSHALL ""
       --rename-command CONFIG ""
       --rename-command SHUTDOWN SHUTDOWN_PROD
-    # Restart policy for production
     restart: always
-    # Health check configuration
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  app:
+    environment:
+      - NODE_ENV=production
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+        reservations:
+          cpus: '2.0'
+          memory: 2G
+    restart: always
+    healthcheck:
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
