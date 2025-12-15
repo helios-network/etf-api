@@ -55,6 +55,10 @@ async function middlewareAfterDeposit(
     }
     walletHolding.markModified("volumeTradedUSD")
   }
+
+  // Update ETF total supply
+  etf.totalSupply = (etf.totalSupply ?? 0) + Number(ethers.parseUnits(shares.toString(), etf.shareDecimals ?? 18).toString())
+  etf.markModified("totalSupply")
 }
 
 async function middlewareAfterRedeem(
@@ -82,6 +86,13 @@ async function middlewareAfterRedeem(
     }
     walletHolding.markModified("volumeTradedUSD")
   }
+
+  // Update ETF total supply
+  etf.totalSupply = (etf.totalSupply ?? 0) - Number(ethers.parseUnits(shares.toString(), etf.shareDecimals ?? 18).toString())
+  if (etf.totalSupply < 0) {
+    etf.totalSupply = 0
+  }
+  etf.markModified("totalSupply")
 }
 
 /**

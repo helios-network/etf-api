@@ -21,6 +21,7 @@ export interface IETF extends Document {
   tvl: string
   volumeTradedUSD: string
   sharePrice?: number
+  totalSupply?: number
   eventNonce: bigint
   eventHeight: bigint
   etfNonce: bigint
@@ -71,6 +72,10 @@ const ETFSchema: Schema = new Schema(
       type: Number,
       default: 0,
     },
+    totalSupply: {
+      type: Number,
+      default: 0,
+    },
     eventNonce: {
       type: BigInt,
       required: true,
@@ -100,22 +105,10 @@ const ETFSchema: Schema = new Schema(
             type: String,
             required: true,
           },
-          // feed: {
-          //   type: String,
-          //   required: true,
-          // },
           targetWeightBps: {
             type: Number,
             required: true,
           },
-          // depositPath: {
-          //   type: [String],
-          //   default: [],
-          // },
-          // withdrawPath: {
-          //   type: [String],
-          //   default: [],
-          // },
           symbol: {
             type: String,
           },
