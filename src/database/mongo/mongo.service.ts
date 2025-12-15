@@ -1,16 +1,18 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 
 @Injectable()
 export class MongoService implements OnModuleInit {
+  private readonly logger = new Logger(MongoService.name);
+
   constructor(@InjectConnection() private connection: Connection) {}
 
   async onModuleInit() {
     if (this.connection.readyState === 1) {
-      console.log('MongoDB Atlas connected successfully');
+      this.logger.log('MongoDB Atlas connected successfully');
     } else {
-      console.warn('MongoDB connection state:', this.connection.readyState);
+      this.logger.warn('MongoDB connection state:', this.connection.readyState);
     }
   }
 

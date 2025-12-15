@@ -10,8 +10,14 @@ export const validationSchema = Joi.object({
   REDIS_PORT: Joi.number().default(6379),
   REDIS_PASSWORD: Joi.string().allow('').optional(),
   REDIS_TTL: Joi.number().default(3600),
-  CACHE_ENABLED: Joi.boolean().default(true),
-  CACHE_NAMESPACE: Joi.string().optional(),
+  CACHE_ENABLED: Joi.string()
+    .valid('true', 'false', '1', '0')
+    .default('true'),
+  CACHE_NAMESPACE: Joi.string().default('etf_api'),
   CACHE_TTL: Joi.number().min(1).default(300),
+  CORS_ENABLED: Joi.string()
+    .valid('true', 'false', '1', '0')
+    .optional(),
+  CORS_ORIGINS: Joi.string().optional(),
 });
 
