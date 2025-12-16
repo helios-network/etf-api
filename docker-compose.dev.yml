@@ -1,8 +1,59 @@
-# Development overrides for docker-compose.yml
-# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# Production Docker Compose
+# Usage: docker compose -f docker-compose.dev.yml up -d
+# Redis sur localhost:6379, App dans le même réseau Docker, communication via le nom du service
 
 services:
   redis:
-    # Expose Redis port for local development/debugging
+    image: redis:7-alpine
+    container_name: etf_redis
+    volumes:
+      - redis_data:/data
     ports:
       - "6379:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --bind
+      - 0.0.0.0
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --protected-mode
+      - "no"
+      - --timeout
+      - "0"
+      - --tcp-backlog
+      - "511"
+      - --rename-command
+      - FLUSHDB
+      - ""
+      - --rename-command
+      - FLUSHALL
+      - ""
+      - --rename-command
+      - CONFIG
+      - ""
+    networks:
+      - etf_network
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a $REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+networks:
+  etf_network:
+    driver: bridge
+
+volumes:
+  redis_data:
