@@ -64,6 +64,7 @@ type EventLog = {
     symbol?: string;
   };
   blockNumber: bigint;
+  transactionHash?: `0x${string}`;
 };
 
 interface WalletHoldingData {
@@ -78,7 +79,10 @@ interface WalletHoldingData {
     amountUSD: number;
   }>;
   rewards: any[];
-  transactionsPerformed: number;
+  createEtfCount: number;
+  depositCount: number;
+  redeemCount: number;
+  rebalanceCount: number;
   volumeTradedUSD: number;
   tvl: number;
   _id?: any;
@@ -201,16 +205,6 @@ export class EventProcessingJob {
   }
 
   /**
-   * Middleware to update transactions and volume before deposit/redeem operations
-   */
-  private middlewareBeforeDepositOrRedeem(
-    walletHolding: WalletHoldingData,
-  ): void {
-    const currentTransactions = walletHolding.transactionsPerformed ?? 0;
-    walletHolding.transactionsPerformed = currentTransactions + 1;
-  }
-
-  /**
    * Get or create wallet holding from map
    */
   private getOrCreateWalletHolding(
@@ -223,7 +217,10 @@ export class EventProcessingJob {
         wallet: user,
         deposits: [],
         rewards: [],
-        transactionsPerformed: 0,
+        createEtfCount: 0,
+        depositCount: 0,
+        redeemCount: 0,
+        rebalanceCount: 0,
         volumeTradedUSD: 0,
         tvl: 0,
       };
@@ -335,8 +332,10 @@ export class EventProcessingJob {
       walletHolding.deposits.push(deposit);
     }
 
+    // Increment deposit count
+    walletHolding.depositCount = (walletHolding.depositCount ?? 0) + 1;
+    
     // Apply middlewares
-    this.middlewareBeforeDepositOrRedeem(walletHolding);
     await this.middlewareAfterDeposit(sharesOut, walletHolding, etf, client);
   }
 
@@ -396,8 +395,10 @@ export class EventProcessingJob {
       walletHolding.deposits.push(deposit);
     }
 
+    // Increment redeem count
+    walletHolding.redeemCount = (walletHolding.redeemCount ?? 0) + 1;
+    
     // Apply middlewares
-    this.middlewareBeforeDepositOrRedeem(walletHolding);
     await this.middlewareAfterRedeem(sharesIn, walletHolding, etf, client);
   }
 
@@ -408,6 +409,7 @@ export class EventProcessingJob {
     log: EventLog,
     chainId: ChainId,
     client: PublicClient,
+    holdingsMap: Map<string, WalletHoldingData>,
   ): Promise<void> {
     const {
       vault,
@@ -420,6 +422,24 @@ export class EventProcessingJob {
     } = log.args;
 
     if (!vault) return;
+
+    // Try to get the creator wallet from transaction
+    if (log.transactionHash) {
+      try {
+        const tx = await client.getTransaction({ hash: log.transactionHash });
+        if (tx.from) {
+          const walletHolding = this.getOrCreateWalletHolding(
+            tx.from,
+            holdingsMap,
+          );
+          walletHolding.createEtfCount = (walletHolding.createEtfCount ?? 0) + 1;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed to get transaction for ETFCreated event: ${error}`,
+        );
+      }
+    }
 
     try {
       // Fetch vault configuration from blockchain
@@ -480,10 +500,37 @@ export class EventProcessingJob {
     log: EventLog,
     chainId: ChainId,
     client: PublicClient,
+    holdingsMap: Map<string, WalletHoldingData>,
   ): Promise<void> {
     const { vault } = log.args;
 
     if (!vault) return;
+
+    // Find all wallets that have deposits in this vault
+    try {
+      const walletHoldings = await this.walletHoldingModel
+        .find({
+          'deposits.etfVaultAddress': vault,
+          'deposits.chain': Number(chainId),
+        })
+        .lean()
+        .exec();
+
+      // Increment rebalanceCount for each wallet that has deposits in this vault
+      for (const holding of walletHoldings) {
+        const walletHolding = this.getOrCreateWalletHolding(
+          holding.wallet,
+          holdingsMap,
+        );
+        walletHolding.rebalanceCount =
+          (walletHolding.rebalanceCount ?? 0) + 1;
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error finding wallets for rebalance event in vault ${vault}:`,
+        error,
+      );
+    }
 
     // TODO: save liquidity tvl on the etf
   }
@@ -778,8 +825,20 @@ export class EventProcessingJob {
         },
       };
 
-      if (walletHolding.transactionsPerformed !== undefined) {
-        updateOp.$set.transactionsPerformed = walletHolding.transactionsPerformed;
+      if (walletHolding.createEtfCount !== undefined) {
+        updateOp.$set.createEtfCount = walletHolding.createEtfCount;
+      }
+
+      if (walletHolding.depositCount !== undefined) {
+        updateOp.$set.depositCount = walletHolding.depositCount;
+      }
+
+      if (walletHolding.redeemCount !== undefined) {
+        updateOp.$set.redeemCount = walletHolding.redeemCount;
+      }
+
+      if (walletHolding.rebalanceCount !== undefined) {
+        updateOp.$set.rebalanceCount = walletHolding.rebalanceCount;
       }
 
       if (walletHolding.volumeTradedUSD !== undefined) {
@@ -801,7 +860,10 @@ export class EventProcessingJob {
         deposits,
         rewards: [],
         tvl: walletHolding.tvl ?? 0,
-        transactionsPerformed: walletHolding.transactionsPerformed || 0,
+        createEtfCount: walletHolding.createEtfCount ?? 0,
+        depositCount: walletHolding.depositCount ?? 0,
+        redeemCount: walletHolding.redeemCount ?? 0,
+        rebalanceCount: walletHolding.rebalanceCount ?? 0,
         volumeTradedUSD: walletHolding.volumeTradedUSD || 0,
       });
       existingWalletSet.add(walletHolding.wallet);
@@ -869,10 +931,45 @@ export class EventProcessingJob {
             }
             break;
           case 'ETFCreated':
-            await this.processETFCreatedEvent(log, chainId, client);
+            await this.processETFCreatedEvent(log, chainId, client, holdingsMap);
+            // Save wallet holdings that were modified (if any)
+            if (log.transactionHash) {
+              try {
+                const tx = await client.getTransaction({ hash: log.transactionHash });
+                if (tx.from) {
+                  const walletHolding = holdingsMap.get(tx.from);
+                  if (walletHolding) {
+                    await this.saveWalletHolding(walletHolding, existingWalletSet);
+                  }
+                }
+              } catch (error) {
+                // Error already logged in processETFCreatedEvent
+              }
+            }
             break;
           case 'Rebalance':
-            await this.processRebalanceEvent(log, chainId, client);
+            await this.processRebalanceEvent(log, chainId, client, holdingsMap);
+            // Save all wallet holdings that were modified
+            const { vault } = log.args;
+            if (vault) {
+              try {
+                const walletHoldings = await this.walletHoldingModel
+                  .find({
+                    'deposits.etfVaultAddress': vault,
+                    'deposits.chain': Number(chainId),
+                  })
+                  .lean()
+                  .exec();
+                for (const holding of walletHoldings) {
+                  const walletHolding = holdingsMap.get(holding.wallet);
+                  if (walletHolding) {
+                    await this.saveWalletHolding(walletHolding, existingWalletSet);
+                  }
+                }
+              } catch (error) {
+                // Error already logged in processRebalanceEvent
+              }
+            }
             break;
           case 'ParamsUpdated':
             await this.processParamsUpdatedEvent(log, chainId, client);
@@ -1160,7 +1257,10 @@ export class EventProcessingJob {
         wallet: holding.wallet,
         deposits: holding.deposits,
         rewards: holding.rewards,
-        transactionsPerformed: holding.transactionsPerformed,
+        createEtfCount: holding.createEtfCount ?? 0,
+        depositCount: holding.depositCount ?? 0,
+        redeemCount: holding.redeemCount ?? 0,
+        rebalanceCount: holding.rebalanceCount ?? 0,
         volumeTradedUSD: holding.volumeTradedUSD,
         tvl: holding.tvl,
         _id: holding._id,

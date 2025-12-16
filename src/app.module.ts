@@ -14,7 +14,9 @@ import { RewardsModule } from './modules/rewards/rewards.module';
 import { EtfsModule } from './modules/etfs/etfs.module';
 import { ChainlinkDataFeedsModule } from './modules/chainlink-data-feeds/chainlink-data-feeds.module';
 import { LeaderBoardModule } from './modules/leader-board/leader-board.module';
+import { PortfolioModule } from './modules/portfolio/portfolio.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+// import { AdminModule } from './modules/admin/admin.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
@@ -50,6 +52,8 @@ function shouldLoadJobsModules(): boolean {
     EtfsModule,
     ChainlinkDataFeedsModule,
     LeaderBoardModule,
+    PortfolioModule,
+    // AdminModule,
   ],
   providers: [
     {

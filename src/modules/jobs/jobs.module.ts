@@ -24,6 +24,7 @@ import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.s
 import { EventProcessingJob } from './event-processing.job';
 import { ChainlinkSyncJob } from './chainlink-sync.job';
 import { RewardDistributionJob } from './reward-distribution.job';
+import { VolumeSyncJob } from './volume-sync.job';
 
 @Module({
   imports: [
@@ -43,6 +44,8 @@ import { RewardDistributionJob } from './reward-distribution.job';
     EventProcessingJob,
     ChainlinkSyncJob,
     RewardDistributionJob,
+    VolumeSyncJob,
   ],
+  exports: [VolumeSyncJob],
 })
 export class JobsModule {}

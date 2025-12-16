@@ -44,6 +44,21 @@ export class RewardsController {
     }
   }
 
+  @Get(':address/total-points')
+  async getUserTotalPoints(@Param('address') address: string) {
+    try {
+      return await this.rewardsService.getUserTotalPoints(address);
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Post(':address/claim/:symbol')
   async claimReward(
     @Param('address') address: string,

@@ -56,7 +56,16 @@ export class WalletHolding {
   }>;
 
   @Prop({ type: Number, default: 0 })
-  transactionsPerformed: number;
+  createEtfCount: number;
+
+  @Prop({ type: Number, default: 0 })
+  depositCount: number;
+
+  @Prop({ type: Number, default: 0 })
+  redeemCount: number;
+
+  @Prop({ type: Number, default: 0 })
+  rebalanceCount: number;
 
   @Prop({ type: Number, default: 0 })
   volumeTradedUSD: number;
