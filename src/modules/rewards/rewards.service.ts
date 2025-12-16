@@ -13,7 +13,6 @@ import {
 } from '../../models/leader-board-rewards.schema';
 import { Web3Service } from '../../services/web3.service';
 import { ChainId } from '../../config/web3';
-import { SUPPORTED_ASSETS } from '../../constants';
 import { TRANSACTION_POINTS } from '../../constants/transaction-points';
 import { verifyMessage, erc20Abi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -141,16 +140,16 @@ export class RewardsService {
           0n,
         );
 
-        const token = SUPPORTED_ASSETS[Number(chainId) as ChainId]?.find(
-          (asset) => asset.symbol === symbol,
-        );
+        // const token = SUPPORTED_ASSETS[Number(chainId) as ChainId]?.find(
+        //   (asset) => asset.symbol === symbol,
+        // );
 
-        if (!token) {
-          return {
-            success: false,
-            message: 'Token not found',
-          };
-        }
+        // if (!token) {
+        //   return {
+        //     success: false,
+        //     message: 'Token not found',
+        //   };
+        // }
 
         const ownerAccount = this.web3Service.getAccount(
           Number(chainId) as ChainId,
@@ -183,7 +182,7 @@ export class RewardsService {
 
         const { request } = await publicClient.simulateContract({
           account: ownerAccount,
-          address: token.address as `0x${string}`,
+          address: `0x0000000000000000000000000000000000000000` as `0x${string}`,//token.address as `0x${string}`,
           abi: erc20Abi,
           functionName: 'transfer',
           args: [address as `0x${string}`, totalAmount],
