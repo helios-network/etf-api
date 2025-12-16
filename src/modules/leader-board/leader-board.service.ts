@@ -3,7 +3,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CacheService } from '../../infrastructure/cache/cache.service';
 import { WalletHolding, WalletHoldingDocument } from '../../models/wallet-holding.schema';
+import { ETF, ETFDocument } from '../../models/etf.schema';
 import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
+import { TRANSACTION_POINTS } from '../../constants/transaction-points';
 
 @Injectable()
 export class LeaderBoardService {
@@ -12,6 +14,8 @@ export class LeaderBoardService {
   constructor(
     @InjectModel(WalletHolding.name)
     private walletHoldingModel: Model<WalletHoldingDocument>,
+    @InjectModel(ETF.name)
+    private etfModel: Model<ETFDocument>,
     private readonly cacheService: CacheService,
     private readonly walletHoldingUtils: WalletHoldingUtilsService,
   ) {}
@@ -23,6 +27,76 @@ export class LeaderBoardService {
     return rewards.reduce((total, reward) => {
       return total + BigInt(reward.amount?.toString() ?? '0');
     }, 0n);
+  }
+
+  /**
+   * Calculate volume from deposits if volumeTradedUSD is 0 or missing
+   * Volume = sum of absolute values of all deposit amountUSD
+   */
+  private async calculateVolumeFromDeposits(
+    deposits: Array<{
+      chain: number;
+      symbol: string;
+      decimals?: number;
+      etfVaultAddress?: string;
+      etfTokenAddress?: string;
+      amount: string;
+      amountUSD?: number;
+    }>,
+  ): Promise<number> {
+    if (!deposits || deposits.length === 0) {
+      return 0;
+    }
+
+    let totalVolume = 0;
+
+    // First, try to use amountUSD from deposits (if available and non-zero)
+    const depositsWithAmountUSD = deposits.filter(
+      (dep) => dep.amountUSD != null && dep.amountUSD !== 0,
+    );
+
+    if (depositsWithAmountUSD.length > 0) {
+      // Sum absolute values of amountUSD
+      totalVolume = depositsWithAmountUSD.reduce(
+        (sum, dep) => sum + Math.abs(dep.amountUSD || 0),
+        0,
+      );
+    }
+
+    // If we still don't have volume, calculate from current ETF prices
+    if (totalVolume === 0) {
+      for (const deposit of deposits) {
+        const sharesAmount = BigInt(deposit.amount?.toString() ?? '0');
+        if (sharesAmount === 0n) {
+          continue;
+        }
+
+        const vaultAddress = deposit.etfVaultAddress;
+        if (!vaultAddress) {
+          continue;
+        }
+
+        try {
+          const etf = await this.etfModel.findOne({ vault: vaultAddress });
+          if (!etf || !etf.sharePrice || etf.sharePrice <= 0) {
+            continue;
+          }
+
+          const depositDecimals = deposit.decimals ?? etf.shareDecimals ?? 18;
+          const sharesInHumanReadable =
+            Number(sharesAmount) / Math.pow(10, depositDecimals);
+          const depositValueUSD = sharesInHumanReadable * etf.sharePrice;
+          totalVolume += Math.abs(depositValueUSD);
+        } catch (error) {
+          this.logger.warn(
+            `Error calculating volume for deposit ${vaultAddress}:`,
+            error,
+          );
+        }
+      }
+    }
+
+    return totalVolume;
   }
 
   async getLeaderBoard(
@@ -69,7 +143,6 @@ export class LeaderBoardService {
     const entries: Array<{
       rank: number;
       address: string;
-      totalPointsAccrued: bigint;
       feesGenerated: bigint;
       volumeTradedUSD: number;
       transactionsPerformed: number;
@@ -77,6 +150,19 @@ export class LeaderBoardService {
       avgTransactionSize: number;
       pointsPerTransaction: bigint;
       lastActivity: Date | null;
+      transactionCounts: {
+        createEtf: number;
+        deposit: number;
+        redeem: number;
+        rebalance: number;
+      };
+      pointsByType: {
+        createEtf: number;
+        deposit: number;
+        redeem: number;
+        rebalance: number;
+      };
+      totalPoints: number;
     }> = [];
 
     // Process wallets in batches using cursor
@@ -119,9 +205,9 @@ export class LeaderBoardService {
         case 'points':
         default:
           comparison =
-            a.totalPointsAccrued > b.totalPointsAccrued
+            a.totalPoints > b.totalPoints
               ? 1
-              : a.totalPointsAccrued < b.totalPointsAccrued
+              : a.totalPoints < b.totalPoints
                 ? -1
                 : 0;
           break;
@@ -168,7 +254,6 @@ export class LeaderBoardService {
       return {
         rank: entry.rank,
         address: entry.address,
-        totalPointsAccrued: entry.totalPointsAccrued.toString(),
         feesGenerated: entry.feesGenerated.toString(),
         volumeTradedUSD,
         transactionsPerformed: entry.transactionsPerformed || 0,
@@ -176,6 +261,9 @@ export class LeaderBoardService {
         avgTransactionSize,
         pointsPerTransaction: entry.pointsPerTransaction.toString(),
         lastActivity: entry.lastActivity ? entry.lastActivity.toISOString() : null,
+        transactionCounts: entry.transactionCounts,
+        pointsByType: entry.pointsByType,
+        totalPoints: entry.totalPoints,
       };
     });
 
@@ -202,7 +290,6 @@ export class LeaderBoardService {
     Array<{
       rank: number;
       address: string;
-      totalPointsAccrued: bigint;
       feesGenerated: bigint;
       volumeTradedUSD: number;
       transactionsPerformed: number;
@@ -210,22 +297,74 @@ export class LeaderBoardService {
       avgTransactionSize: number;
       pointsPerTransaction: bigint;
       lastActivity: Date | null;
+      transactionCounts: {
+        createEtf: number;
+        deposit: number;
+        redeem: number;
+        rebalance: number;
+      };
+      pointsByType: {
+        createEtf: number;
+        deposit: number;
+        redeem: number;
+        rebalance: number;
+      };
+      totalPoints: number;
     }>
   > {
     // Calculate leaderboard entries with TVL for this batch
     const entriesPromises = walletHoldings.map(async (holding) => {
-      const totalPointsAccrued = this.calculateTotalPoints(holding.rewards || []);
       // Ensure volumeTradedUSD is always a valid number
-      const volumeTradedUSD = 
+      let volumeTradedUSD = 
         holding.volumeTradedUSD != null && 
-        !isNaN(Number(holding.volumeTradedUSD)) 
+        !isNaN(Number(holding.volumeTradedUSD)) && 
+        Number(holding.volumeTradedUSD) > 0
           ? Number(holding.volumeTradedUSD) 
           : 0;
-      const transactionsPerformed = 
-        holding.transactionsPerformed != null && 
-        !isNaN(Number(holding.transactionsPerformed))
-          ? Number(holding.transactionsPerformed)
-          : 0;
+      
+      // If volume is 0, try to calculate it from deposits
+      if (volumeTradedUSD === 0 && holding.deposits && holding.deposits.length > 0) {
+        try {
+          volumeTradedUSD = await this.calculateVolumeFromDeposits(holding.deposits);
+          // Optionally update the wallet in background (don't await)
+          if (volumeTradedUSD > 0) {
+            this.walletHoldingModel
+              .updateOne(
+                { _id: holding._id },
+                { $set: { volumeTradedUSD } },
+              )
+              .catch((err) =>
+                this.logger.error(
+                  `Error updating volumeTradedUSD for wallet ${holding.wallet}:`,
+                  err,
+                ),
+              );
+          }
+        } catch (error) {
+          this.logger.error(
+            `Error calculating volume for wallet ${holding.wallet}:`,
+            error,
+          );
+        }
+      }
+      
+      // Get transaction counts
+      const createEtfCount = holding.createEtfCount ?? 0;
+      const depositCount = holding.depositCount ?? 0;
+      const redeemCount = holding.redeemCount ?? 0;
+      const rebalanceCount = holding.rebalanceCount ?? 0;
+      
+      const transactionsPerformed = createEtfCount + depositCount + redeemCount + rebalanceCount;
+
+      // Calculate points by type
+      const pointsByType = {
+        createEtf: createEtfCount * TRANSACTION_POINTS.CREATE_ETF,
+        deposit: depositCount * TRANSACTION_POINTS.DEPOSIT,
+        redeem: redeemCount * TRANSACTION_POINTS.REDEEM,
+        rebalance: rebalanceCount * TRANSACTION_POINTS.REBALANCE,
+      };
+
+      const totalPoints = pointsByType.createEtf + pointsByType.deposit + pointsByType.redeem + pointsByType.rebalance;
 
       // Calculate average transaction size
       const avgTransactionSize =
@@ -234,7 +373,7 @@ export class LeaderBoardService {
       // Calculate points per transaction
       const pointsPerTransaction =
         transactionsPerformed > 0
-          ? totalPointsAccrued / BigInt(transactionsPerformed)
+          ? BigInt(totalPoints) / BigInt(transactionsPerformed)
           : 0n;
 
       // Calculate TVL if not set or if deposits exist
@@ -262,7 +401,6 @@ export class LeaderBoardService {
       return {
         rank: 0, // Will be set after sorting
         address: holding.wallet,
-        totalPointsAccrued,
         feesGenerated: 0n, // TODO: Calculate fees if needed
         volumeTradedUSD,
         transactionsPerformed,
@@ -270,6 +408,14 @@ export class LeaderBoardService {
         avgTransactionSize,
         pointsPerTransaction,
         lastActivity: holding.updatedAt || null,
+        transactionCounts: {
+          createEtf: createEtfCount,
+          deposit: depositCount,
+          redeem: redeemCount,
+          rebalance: rebalanceCount,
+        },
+        pointsByType,
+        totalPoints,
       };
     });
 

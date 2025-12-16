@@ -16,6 +16,7 @@ import { ChainlinkDataFeedsModule } from './modules/chainlink-data-feeds/chainli
 import { LeaderBoardModule } from './modules/leader-board/leader-board.module';
 import { PortfolioModule } from './modules/portfolio/portfolio.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+// import { AdminModule } from './modules/admin/admin.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
@@ -49,6 +50,7 @@ function shouldLoadJobsModules(): boolean {
     ChainlinkDataFeedsModule,
     LeaderBoardModule,
     PortfolioModule,
+    // AdminModule,
   ],
   providers: [
     {

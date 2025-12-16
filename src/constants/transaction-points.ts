@@ -1,0 +1,6 @@
+export const TRANSACTION_POINTS = {
+  CREATE_ETF: 2000,
+  DEPOSIT: 100,
+  REDEEM: 100,
+  REBALANCE: 3000,
+} as const;

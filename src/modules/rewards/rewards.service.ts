@@ -14,6 +14,7 @@ import {
 import { Web3Service } from '../../services/web3.service';
 import { ChainId } from '../../config/web3';
 import { SUPPORTED_ASSETS } from '../../constants';
+import { TRANSACTION_POINTS } from '../../constants/transaction-points';
 import { verifyMessage, erc20Abi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
@@ -60,6 +61,51 @@ export class RewardsService {
     return {
       success: true,
       data: walletHolding.rewards,
+    };
+  }
+
+  async getUserTotalPoints(address: string) {
+    const walletHolding = await this.walletHoldingModel.findOne({
+      wallet: { $regex: new RegExp(`^${address}$`, 'i') },
+    });
+
+    if (!walletHolding) {
+      return {
+        success: false,
+        message: 'Wallet not found',
+      };
+    }
+
+    const createEtfCount = walletHolding.createEtfCount ?? 0;
+    const depositCount = walletHolding.depositCount ?? 0;
+    const redeemCount = walletHolding.redeemCount ?? 0;
+    const rebalanceCount = walletHolding.rebalanceCount ?? 0;
+
+    const pointsByType = {
+      createEtf: createEtfCount * TRANSACTION_POINTS.CREATE_ETF,
+      deposit: depositCount * TRANSACTION_POINTS.DEPOSIT,
+      redeem: redeemCount * TRANSACTION_POINTS.REDEEM,
+      rebalance: rebalanceCount * TRANSACTION_POINTS.REBALANCE,
+    };
+
+    const totalPoints =
+      pointsByType.createEtf +
+      pointsByType.deposit +
+      pointsByType.redeem +
+      pointsByType.rebalance;
+
+    return {
+      success: true,
+      data: {
+        totalPoints,
+        transactionCounts: {
+          createEtf: createEtfCount,
+          deposit: depositCount,
+          redeem: redeemCount,
+          rebalance: rebalanceCount,
+        },
+        pointsByType,
+      },
     };
   }
 
