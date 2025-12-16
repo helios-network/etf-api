@@ -14,7 +14,7 @@ export enum ChainId {
 
 export const DEFAULT_RPC_URLS = {
   [ChainId.MAINNET]: 'https://ethereum-rpc.publicnode.com',
-  [ChainId.ARBITRUM]: 'https://arbitrum-rpc.publicnode.com',
+  [ChainId.ARBITRUM]: 'https://arbitrum-one-rpc.publicnode.com',
 };
 
 export const publicClients: Record<ChainId, PublicClient> = {
