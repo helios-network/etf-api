@@ -335,6 +335,12 @@ export class EventProcessingJob {
     // Increment deposit count
     walletHolding.depositCount = (walletHolding.depositCount ?? 0) + 1;
     
+    // Increment ETF deposit count
+    await this.etfModel.updateOne(
+      { _id: etf._id },
+      { $inc: { depositCount: 1 } },
+    );
+    
     // Apply middlewares
     await this.middlewareAfterDeposit(sharesOut, walletHolding, etf, client);
   }
@@ -397,6 +403,12 @@ export class EventProcessingJob {
 
     // Increment redeem count
     walletHolding.redeemCount = (walletHolding.redeemCount ?? 0) + 1;
+    
+    // Increment ETF redeem count
+    await this.etfModel.updateOne(
+      { _id: etf._id },
+      { $inc: { redeemCount: 1 } },
+    );
     
     // Apply middlewares
     await this.middlewareAfterRedeem(sharesIn, walletHolding, etf, client);
