@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { type PublicClient, parseAbi, encodeAbiParameters } from 'viem';
-import { UNISWAP_V2_FACTORY, UNISWAP_V2_ROUTER } from '../constants';
+import { ASSETS_ADDRS, UNISWAP_V2_FACTORY_ADDRS, UNISWAP_V2_ROUTER_ADDRS } from '../constants';
 import { V2PoolInfo } from '../types/etf-verify.types';
 
 /**
@@ -34,12 +34,13 @@ export class UniswapV2ResolverService {
    */
   async checkV2Pool(
     client: PublicClient,
+    chainId: number,
     tokenA: `0x${string}`,
     tokenB: `0x${string}`,
   ): Promise<{ exists: boolean; pairAddress: `0x${string}` | null }> {
     try {
       const pairAddress = await client.readContract({
-        address: UNISWAP_V2_FACTORY as `0x${string}`,
+        address: UNISWAP_V2_FACTORY_ADDRS[chainId] as `0x${string}`,
         abi: V2_FACTORY_ABI,
         functionName: 'getPair',
         args: [tokenA, tokenB],
@@ -86,6 +87,7 @@ export class UniswapV2ResolverService {
    */
   async calculateV2LiquidityUSD(
     client: PublicClient,
+    chainId: number,
     tokenA: `0x${string}`,
     tokenB: `0x${string}`,
     tokenADecimals: number,
@@ -94,7 +96,7 @@ export class UniswapV2ResolverService {
     tokenBPriceUSD: number | null,
   ): Promise<number> {
     try {
-      const { exists, pairAddress } = await this.checkV2Pool(client, tokenA, tokenB);
+      const { exists, pairAddress } = await this.checkV2Pool(client, chainId, tokenA, tokenB);
       if (!exists || !pairAddress) {
         return 0;
       }
@@ -136,7 +138,7 @@ export class UniswapV2ResolverService {
       const amountIn = BigInt(10 ** tokenADecimals); // 1 token
       try {
         const amountsOut = await client.readContract({
-          address: UNISWAP_V2_ROUTER as `0x${string}`,
+          address: UNISWAP_V2_ROUTER_ADDRS[chainId] as `0x${string}`,
           abi: V2_ROUTER_ABI,
           functionName: 'getAmountsOut',
           args: [amountIn, [tokenA, tokenB]],
@@ -179,15 +181,15 @@ export class UniswapV2ResolverService {
    * Get WETH price in USDC using Uniswap V2
    * This is used when targetTokenPriceUSD is null or 0
    */
-  async getWETHPriceInUSDC(client: PublicClient): Promise<number | null> {
+  async getWETHPriceInUSDC(client: PublicClient, chainId: number): Promise<number | null> {
     try {
-      const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as `0x${string}`;
-      const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as `0x${string}`;
+      const WETH = ASSETS_ADDRS[chainId].WETH as `0x${string}`;
+      const USDC = ASSETS_ADDRS[chainId].USDC as `0x${string}`;
       const WETH_DECIMALS = 18;
       const USDC_DECIMALS = 6;
 
       // Check if WETH/USDC pool exists
-      const { exists } = await this.checkV2Pool(client, WETH, USDC);
+      const { exists } = await this.checkV2Pool(client, chainId, WETH, USDC);
       if (!exists) {
         this.logger.warn('WETH/USDC pool does not exist on Uniswap V2');
         return null;
@@ -196,7 +198,7 @@ export class UniswapV2ResolverService {
       // Quote 1 WETH in USDC
       const amountIn = BigInt(10 ** WETH_DECIMALS); // 1 WETH
       const amountsOut = await client.readContract({
-        address: UNISWAP_V2_ROUTER as `0x${string}`,
+        address: UNISWAP_V2_ROUTER_ADDRS[chainId] as `0x${string}`,
         abi: V2_ROUTER_ABI,
         functionName: 'getAmountsOut',
         args: [amountIn, [WETH, USDC]],
@@ -218,6 +220,7 @@ export class UniswapV2ResolverService {
    */
   async findV2Path(
     client: PublicClient,
+    chainId: number,
     depositToken: `0x${string}`,
     targetToken: `0x${string}`,
     depositTokenDecimals: number,
@@ -228,6 +231,7 @@ export class UniswapV2ResolverService {
     // Try direct path first
     const directLiquidity = await this.calculateV2LiquidityUSD(
       client,
+      chainId,
       depositToken,
       targetToken,
       depositTokenDecimals,
@@ -254,6 +258,7 @@ export class UniswapV2ResolverService {
     // Check depositToken -> WETH
     const depositToWethLiquidity = await this.calculateV2LiquidityUSD(
       client,
+      chainId,
       depositToken,
       WETH,
       depositTokenDecimals,
@@ -265,7 +270,7 @@ export class UniswapV2ResolverService {
     // Get WETH price in USDC using Uniswap V2 (needed when targetTokenPriceUSD is null or 0)
     let wethPrice: number | null = null;
     if (!targetTokenPriceUSD || targetTokenPriceUSD === 0) {
-      wethPrice = await this.getWETHPriceInUSDC(client);
+      wethPrice = await this.getWETHPriceInUSDC(client, chainId);
       if (!wethPrice) {
         this.logger.warn(
           'Could not get WETH price in USDC, cannot calculate liquidity for WETH -> targetToken path',
@@ -276,6 +281,7 @@ export class UniswapV2ResolverService {
     // Check WETH -> targetToken
     const wethToTargetLiquidity = await this.calculateV2LiquidityUSD(
       client,
+      chainId,
       WETH,
       targetToken,
       18, // WETH decimals

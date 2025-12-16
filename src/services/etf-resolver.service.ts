@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { type PublicClient, erc20Abi, encodeAbiParameters } from 'viem';
-import { MIN_LIQUIDITY_USD } from '../constants';
+import { ASSETS_ADDRS, MIN_LIQUIDITY_USD } from '../constants';
 import { ChainlinkResolverService } from './chainlink-resolver.service';
 import { UniswapV2ResolverService } from './uniswap-v2-resolver.service';
 import { UniswapV3ResolverService } from './uniswap-v3-resolver.service';
@@ -156,6 +156,7 @@ export class EtfResolverService {
     if (hasFeed && targetPrice) {
       const v2Path = await this.uniswapV2Resolver.findV2Path(
         client,
+        chainId,
         depositToken,
         targetToken,
         depositTokenMetadata.decimals,
@@ -172,6 +173,7 @@ export class EtfResolverService {
     if (hasFeed && targetPrice) {
       const v3Path = await this.uniswapV3Resolver.findV3Path(
         client,
+        chainId,
         depositToken,
         targetToken,
         depositTokenMetadata.decimals,
@@ -187,6 +189,7 @@ export class EtfResolverService {
     // Check Mode 3: V2 + V2 (DEX-only)
     const v2Path = await this.uniswapV2Resolver.findV2Path(
       client,
+      chainId,
       depositToken,
       targetToken,
       depositTokenMetadata.decimals,
@@ -201,6 +204,7 @@ export class EtfResolverService {
     // Check Mode 4: V3 + V3 (last resort)
     const v3Path = await this.uniswapV3Resolver.findV3Path(
       client,
+      chainId,
       depositToken,
       targetToken,
       depositTokenMetadata.decimals,
@@ -268,6 +272,7 @@ export class EtfResolverService {
         }
         const v2PathFeed = await this.uniswapV2Resolver.findV2Path(
           client,
+          chainId,
           depositToken,
           targetToken,
           depositTokenMetadata.decimals,
@@ -302,6 +307,7 @@ export class EtfResolverService {
         }
         const v3PathFeed = await this.uniswapV3Resolver.findV3Path(
           client,
+          chainId,
           depositToken,
           targetToken,
           depositTokenMetadata.decimals,
@@ -313,6 +319,7 @@ export class EtfResolverService {
           throw new Error('V3_PLUS_FEED: Insufficient liquidity');
         }
         return this.encodeV3ResolutionResult(
+          chainId,
           v3PathFeed,
           depositToken,
           targetToken,
@@ -322,6 +329,7 @@ export class EtfResolverService {
       case 'V2_PLUS_V2':
         const v2Path = await this.uniswapV2Resolver.findV2Path(
           client,
+          chainId,
           depositToken,
           targetToken,
           depositTokenMetadata.decimals,
@@ -353,6 +361,7 @@ export class EtfResolverService {
       case 'V3_PLUS_V3':
         const v3Path = await this.uniswapV3Resolver.findV3Path(
           client,
+          chainId,
           depositToken,
           targetToken,
           depositTokenMetadata.decimals,
@@ -363,7 +372,7 @@ export class EtfResolverService {
         if (!v3Path.exists || v3Path.liquidityUSD < MIN_LIQUIDITY_USD) {
           throw new Error('V3_PLUS_V3: Insufficient liquidity');
         }
-        return this.encodeV3ResolutionResult(v3Path, depositToken, targetToken, null);
+        return this.encodeV3ResolutionResult(chainId, v3Path, depositToken, targetToken, null);
 
       default:
         throw new Error(`Unknown pricing mode: ${pricingMode}`);
@@ -374,6 +383,7 @@ export class EtfResolverService {
    * Helper function to encode V3 resolution result
    */
   private encodeV3ResolutionResult(
+    chainId: number,
     v3Path: {
       exists: boolean;
       liquidityUSD: number;
@@ -386,7 +396,7 @@ export class EtfResolverService {
     targetToken: `0x${string}`,
     feed: any,
   ): ResolutionResult {
-    const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as `0x${string}`;
+    const WETH = ASSETS_ADDRS[chainId].WETH as `0x${string}`;
 
     let v3PathBytes: string;
     let fee: number;

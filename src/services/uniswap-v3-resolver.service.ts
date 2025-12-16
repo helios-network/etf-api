@@ -1,10 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { type PublicClient, parseAbi, encodePacked } from 'viem';
 import {
-  UNISWAP_V3_FACTORY,
-  UNISWAP_V3_QUOTER,
+  UNISWAP_V3_FACTORY_ADDRS,
+  UNISWAP_V3_QUOTER_ADDRS,
   UNISWAP_V3_FEES,
   MIN_LIQUIDITY_USD,
+  ASSETS_ADDRS,
 } from '../constants';
 import { V3PoolInfo, V3PathInfo } from '../types/etf-verify.types';
 
@@ -41,13 +42,14 @@ export class UniswapV3ResolverService {
    */
   async checkV3Pool(
     client: PublicClient,
+    chainId: number,
     tokenA: `0x${string}`,
     tokenB: `0x${string}`,
     fee: number,
   ): Promise<{ exists: boolean; poolAddress: `0x${string}` | null }> {
     try {
       const poolAddress = await client.readContract({
-        address: UNISWAP_V3_FACTORY as `0x${string}`,
+        address: UNISWAP_V3_FACTORY_ADDRS[chainId] as `0x${string}`,
         abi: V3_FACTORY_ABI,
         functionName: 'getPool',
         args: [tokenA, tokenB, fee],
@@ -91,6 +93,7 @@ export class UniswapV3ResolverService {
    */
   async calculateV3LiquidityUSD(
     client: PublicClient,
+    chainId: number,
     tokenA: `0x${string}`,
     tokenB: `0x${string}`,
     fee: number,
@@ -100,7 +103,7 @@ export class UniswapV3ResolverService {
     tokenBPriceUSD: number | null,
   ): Promise<number> {
     try {
-      const { exists, poolAddress } = await this.checkV3Pool(client, tokenA, tokenB, fee);
+      const { exists, poolAddress } = await this.checkV3Pool(client, chainId, tokenA, tokenB, fee);
       if (!exists || !poolAddress) {
         return 0;
       }
@@ -131,7 +134,7 @@ export class UniswapV3ResolverService {
       const amountIn = BigInt(10 ** tokenADecimals); // 1 token
       try {
         const amountOut = await client.readContract({
-          address: UNISWAP_V3_QUOTER as `0x${string}`,
+          address: UNISWAP_V3_QUOTER_ADDRS[chainId] as `0x${string}`,
           abi: V3_QUOTER_ABI,
           functionName: 'quoteExactInputSingle',
           args: [tokenA, tokenB, fee, amountIn, 0n],
@@ -196,6 +199,7 @@ export class UniswapV3ResolverService {
    */
   async findBestV3Pool(
     client: PublicClient,
+    chainId: number,
     tokenA: `0x${string}`,
     tokenB: `0x${string}`,
     tokenADecimals: number,
@@ -214,6 +218,7 @@ export class UniswapV3ResolverService {
     for (const fee of UNISWAP_V3_FEES) {
       const liquidity = await this.calculateV3LiquidityUSD(
         client,
+        chainId,
         tokenA,
         tokenB,
         fee,
@@ -243,6 +248,7 @@ export class UniswapV3ResolverService {
    */
   async findV3Path(
     client: PublicClient,
+    chainId: number,
     depositToken: `0x${string}`,
     targetToken: `0x${string}`,
     depositTokenDecimals: number,
@@ -253,6 +259,7 @@ export class UniswapV3ResolverService {
     // Try direct path first
     const directPool = await this.findBestV3Pool(
       client,
+      chainId,
       depositToken,
       targetToken,
       depositTokenDecimals,
@@ -271,11 +278,12 @@ export class UniswapV3ResolverService {
     }
 
     // Try 2-hop path via WETH (most common intermediate token on Ethereum)
-    const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as `0x${string}`;
+    const WETH = ASSETS_ADDRS[chainId].WETH as `0x${string}`;
 
     // Find best pool for depositToken -> WETH
     const depositToWethPool = await this.findBestV3Pool(
       client,
+      chainId,
       depositToken,
       WETH,
       depositTokenDecimals,
@@ -287,6 +295,7 @@ export class UniswapV3ResolverService {
     // Find best pool for WETH -> targetToken
     const wethToTargetPool = await this.findBestV3Pool(
       client,
+      chainId,
       WETH,
       targetToken,
       18, // WETH decimals
