@@ -18,14 +18,18 @@ export class VaultUtilsService {
     vaultAddress: `0x${string}`,
   ): Promise<{
     factory: string;
+    owner: string;
+    pricer: string;
+    pricingMode: string;
     depositToken: string;
     depositFeed: string;
     shareToken: string;
     assets: Array<{
       token: string;
       targetWeightBps: number;
-      symbol?: string;
-      decimals?: number;
+      v2Path: string[];
+      v3Path: string;
+      v3PoolFee: number;
     }>;
     imbalanceThresholdBps: bigint;
     depositSymbol: string;
@@ -34,25 +38,34 @@ export class VaultUtilsService {
   }> {
     const vaultAbi = parseAbi([
       'function factory() view returns (address)',
+      'function owner() view returns (address)',
       'function depositToken() view returns (address)',
       'function depositFeed() view returns (address)',
       'function shareToken() view returns (address)',
       'function assetCount() view returns (uint256)',
       'function imbalanceThresholdBps() view returns (uint256)',
+      'function pricer() view returns (address)',
     ]);
 
     const [
       factory,
+      owner,
       depositToken,
       depositFeed,
       shareToken,
       assetsLength,
       imbalanceThresholdBps,
+      pricer,
     ] = await Promise.all([
       client.readContract({
         address: vaultAddress,
         abi: vaultAbi,
         functionName: 'factory',
+      }),
+      client.readContract({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: 'owner',
       }),
       client.readContract({
         address: vaultAddress,
@@ -79,7 +92,70 @@ export class VaultUtilsService {
         abi: vaultAbi,
         functionName: 'imbalanceThresholdBps',
       }),
+      client.readContract({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: 'pricer',
+      }),
     ]);
+
+    const rawPricerResults = await client.call({
+      to: pricer,
+      data: encodeFunctionData({
+        abi: [
+          {
+            type: 'function',
+            name: 'getAssets',
+            inputs: [],
+            outputs: [
+              {
+                type: 'tuple[]',
+                components: [
+                  { name: 'token', type: 'address' },
+                  { name: 'feed', type: 'address' },
+                  { name: 'v2Path', type: 'address[]' },
+                  { name: 'v3Path', type: 'bytes' },
+                  { name: 'v3PoolFee', type: 'uint24' },
+                ],
+              },
+            ],
+            stateMutability: 'view',
+          },
+        ],
+        functionName: 'getAssets',
+        args: [],
+      }),
+    });
+  
+    console.log('rawPricerResults', rawPricerResults);
+  
+    if (!rawPricerResults.data) {
+      throw new Error('No data returned');
+    }
+  
+    const assetsPricerResults = decodeFunctionResult({
+      abi: [
+        {
+          type: 'function',
+          name: 'getAssets',
+          inputs: [],
+          outputs: [
+            {
+              type: 'tuple[]',
+              components: [
+                { name: 'token', type: 'address' },
+                { name: 'feed', type: 'address' },
+                { name: 'v2Path', type: 'address[]' },
+                { name: 'v3Path', type: 'bytes' },
+                { name: 'v3PoolFee', type: 'uint24' },
+              ],
+            },
+          ],
+          stateMutability: 'view',
+        },
+      ],
+      data: rawPricerResults.data,
+    });
 
     const raw = await client.call({
       to: vaultAddress,
@@ -94,10 +170,7 @@ export class VaultUtilsService {
                 type: 'tuple[]',
                 components: [
                   { name: 'token', type: 'address' },
-                  { name: 'feed', type: 'address' },
                   { name: 'targetWeightBps', type: 'uint256' },
-                  { name: 'depositPath', type: 'address[]' },
-                  { name: 'withdrawPath', type: 'address[]' },
                 ],
               },
             ],
@@ -124,10 +197,7 @@ export class VaultUtilsService {
               type: 'tuple[]',
               components: [
                 { name: 'token', type: 'address' },
-                { name: 'feed', type: 'address' },
                 { name: 'targetWeightBps', type: 'uint256' },
-                { name: 'depositPath', type: 'address[]' },
-                { name: 'withdrawPath', type: 'address[]' },
               ],
             },
           ],
@@ -137,13 +207,45 @@ export class VaultUtilsService {
       data: raw.data,
     });
 
-    const assets = assetsResults.map((asset: any) => ({
-      token: asset.token as string,
-      feed: (asset.feed as string) || '',
-      targetWeightBps: Number(asset.targetWeightBps),
-      depositPath: (asset.depositPath as string[]) || [],
-      withdrawPath: (asset.withdrawPath as string[]) || [],
-    }));
+    const pricingMode = await client.readContract({
+      address: pricer,
+      abi: parseAbi([
+        "function pricingMode() view returns (uint256)",
+      ]),
+      functionName: 'pricingMode',
+    })
+
+    const pricingModeMap = new Map<number, string>([
+      [0, 'V2_PLUS_FEED'],
+      [1, 'V3_PLUS_FEED'],
+      [2, 'V2_PLUS_V2'],
+      [3, 'V3_PLUS_V3']
+    ]);
+
+    const pricingModeString = pricingModeMap.get(Number(pricingMode)) || '';
+
+    let assets: any[] = [];
+    for (let i = 0; i < assetsResults.length; i++) {
+      const asset = assetsResults[i];
+      const assetPricer = assetsPricerResults[i];
+
+      assets.push({
+        token: asset.token as string,
+        feed: (assetPricer.feed as string) || '',
+        targetWeightBps: Number(asset.targetWeightBps),
+        v2Path: (assetPricer.v2Path as string[]) || [],
+        v3Path: (assetPricer.v3Path as string) || '',
+        v3PoolFee: Number(assetPricer.v3PoolFee),
+      });
+    }
+
+    // const assets = assetsResults.map((asset: any) => ({
+    //   token: asset.token as string,
+    //   feed: (asset.feed as string) || '',
+    //   targetWeightBps: Number(asset.targetWeightBps),
+    //   depositPath: (asset.depositPath as string[]) || [],
+    //   withdrawPath: (asset.withdrawPath as string[]) || [],
+    // }));
 
     // Fetch symbol and decimals for each asset token
     const assetDetailsPromises = assets.map(async (asset) => {
@@ -219,6 +321,9 @@ export class VaultUtilsService {
 
     return {
       factory: factory as string,
+      owner: owner as string,
+      pricer: pricer as string,
+      pricingMode: pricingModeString,
       depositToken: depositToken as string,
       depositFeed: depositFeed as string,
       shareToken: shareToken as string,

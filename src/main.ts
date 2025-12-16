@@ -72,6 +72,8 @@ export async function bootstrapWorker(): Promise<void> {
   );
 
   if (appRole === 'master') {
+    // Initialize the app to trigger lifecycle hooks and register cron jobs
+    await app.init();
     clusterLogger.log(`HTTP server disabled (master mode)`);
     clusterLogger.log(`Cron jobs enabled`);
     clusterLogger.log(`Process PID: ${process.pid}`);

@@ -7,8 +7,9 @@ export interface AssetConfig {
   token: string;
   feed: string;
   targetWeightBps: number;
-  depositPath: string[];
-  withdrawPath: string[];
+  v2Path?: string[];
+  v3Path?: string;
+  v3PoolFee?: number;
   symbol?: string;
   decimals?: number;
   tvl?: string;
@@ -56,6 +57,15 @@ export class ETF {
   factory?: string;
 
   @Prop({ type: String })
+  owner?: string;
+
+  @Prop({ type: String })
+  pricer?: string;
+
+  @Prop({ type: String })
+  pricingMode?: string;
+
+  @Prop({ type: String })
   depositFeed?: string;
 
   @Prop({ type: Number, default: 0 })
@@ -67,8 +77,9 @@ export class ETF {
         token: { type: String, required: true },
         feed: { type: String, required: true },
         targetWeightBps: { type: Number, required: true },
-        depositPath: { type: [String], required: true },
-        withdrawPath: { type: [String], required: true },
+        v2Path: { type: [String] },
+        v3Path: { type: String },
+        v3PoolFee: { type: Number },
         symbol: { type: String },
         decimals: { type: Number },
         tvl: { type: String },

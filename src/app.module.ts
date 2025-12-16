@@ -19,9 +19,12 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 function shouldLoadJobsModules(): boolean {
+  console.log('shouldLoadJobsModules');
   if (typeof cluster !== 'undefined' && cluster.isPrimary !== undefined) {
+    console.log('cluster.isPrimary === true');
     return cluster.isPrimary === true;
   }
+  console.log('process.env.APP_ROLE === "master"', process.env.APP_ROLE === 'master');
   return process.env.APP_ROLE === 'master';
 }
 

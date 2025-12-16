@@ -42,6 +42,15 @@ export class Event {
   @Prop({ type: String })
   depositOut?: string;
 
+  @Prop({ type: [String] })
+  amountsOut?: string[];
+
+  @Prop({ type: [String] })
+  valuesPerAsset?: string[];
+
+  @Prop({ type: [String] })
+  soldAmounts?: string[];
+
   @Prop({ type: String })
   fromIndex?: string;
 
@@ -59,6 +68,9 @@ export class Event {
 
   @Prop({ type: String })
   maxPriceStaleness?: string;
+
+  @Prop({ type: String })
+  hlsBalance?: string;
 
   @Prop({ type: String })
   eventHeight?: string;

@@ -47,12 +47,16 @@ type EventLog = {
     sharesOut?: bigint;
     sharesIn?: bigint;
     depositOut?: bigint;
+    amountsOut?: bigint[];
+    valuesPerAsset?: bigint[];
+    soldAmounts?: bigint[];
     fromIndex?: bigint;
     toIndex?: bigint;
     moveValue?: bigint;
     bought?: bigint;
     imbalanceThresholdBps?: bigint;
     maxPriceStaleness?: bigint;
+    hlsBalance?: bigint;
     etfNonce?: bigint;
     shareToken?: `0x${string}`;
     depositToken?: `0x${string}`;
@@ -102,7 +106,9 @@ export class EventProcessingJob {
     private readonly web3Service: Web3Service,
     private readonly vaultUtils: VaultUtilsService,
     private readonly walletHoldingUtils: WalletHoldingUtilsService,
-  ) {}
+  ) {
+    this.logger.log('EventProcessingJob constructor called');
+  }
 
   /**
    * Middleware to update wallet TVL after deposit/redeem operations
@@ -425,6 +431,9 @@ export class EventProcessingJob {
       // Create new ETF entry with vault configuration
       await this.etfModel.create({
         vault: vault,
+        owner: vaultConfig.owner,
+        pricer: vaultConfig.pricer,
+        pricingMode: vaultConfig.pricingMode,
         chain: Number(chainId),
         shareToken: vaultConfig.shareToken,
         depositToken: vaultConfig.depositToken,
@@ -538,13 +547,14 @@ export class EventProcessingJob {
     const newEvents: EventLog[] = [];
     const noncesFound: bigint[] = [];
 
+    console.log('Deposit events');
     // 1. Deposit events (most frequent)
     const depositEvents = await client.getLogs({
       address: contractAddress,
       fromBlock,
       toBlock,
       events: parseAbi([
-        'event Deposit(address indexed vault, address user, uint256 depositAmount, uint256 sharesOut, uint256 eventNonce, uint256 eventHeight)',
+        'event Deposit(address indexed vault, address user, uint256 depositAmount, uint256 sharesOut, uint256[] amountsOut, uint256[] valuesPerAsset, uint256 eventNonce, uint256 eventHeight)',
       ]),
     });
 
@@ -562,13 +572,15 @@ export class EventProcessingJob {
       return newEvents;
     }
 
+    console.log('Redeem events');
+
     // 2. Redeem events
     const redeemEvents = await client.getLogs({
       address: contractAddress,
       fromBlock,
       toBlock,
       events: parseAbi([
-        'event Redeem(address indexed vault, address user, uint256 sharesIn, uint256 depositOut, uint256 eventNonce, uint256 eventHeight)',
+        'event Redeem(address indexed vault, address user, uint256 sharesIn, uint256 depositOut, uint256[] soldAmounts, uint256 eventNonce, uint256 eventHeight)',
       ]),
     });
 
@@ -586,6 +598,7 @@ export class EventProcessingJob {
       return newEvents;
     }
 
+    console.log('ETFCreated events');
     // 3. ETFCreated events
     const etfCreatedEvents = await client.getLogs({
       address: contractAddress,
@@ -610,13 +623,15 @@ export class EventProcessingJob {
       return newEvents;
     }
 
+    console.log('Rebalance events');
+
     // 4. Rebalance events
     const rebalanceEvents = await client.getLogs({
       address: contractAddress,
       fromBlock,
       toBlock,
       events: parseAbi([
-        'event Rebalance(address indexed vault, uint256 fromIndex, uint256 toIndex, uint256 moveValue, uint256 eventNonce, uint256 eventHeight, uint256 bought)',
+        'event Rebalance(address indexed vault, address user, uint256 fromIndex, uint256 toIndex, uint256 moveValue, uint256 eventNonce, uint256 eventHeight, uint256 bought)',
       ]),
     });
 
@@ -640,7 +655,7 @@ export class EventProcessingJob {
       fromBlock,
       toBlock,
       events: parseAbi([
-        'event ParamsUpdated(address indexed vault, uint256 imbalanceThresholdBps, uint256 maxPriceStaleness, uint256 eventNonce, uint256 eventHeight)',
+        'event ParamsUpdated(address indexed vault, uint256 imbalanceThresholdBps, uint256 maxPriceStaleness, uint256 hlsBalance, uint256 eventNonce, uint256 eventHeight)',
       ]),
     });
 
@@ -663,7 +678,7 @@ export class EventProcessingJob {
     const depositDecimals = etf?.depositDecimals ?? 18;
     const shareTokenDecimals = etf?.shareDecimals ?? 18;
 
-    await this.eventModel.create({
+    const eventData: Partial<Event> = {
       type: log.eventName,
       chain: Number(chainId),
       user: log.args.user ?? undefined,
@@ -698,6 +713,21 @@ export class EventProcessingJob {
             depositDecimals,
           )
         : undefined,
+      amountsOut: log.args.amountsOut
+        ? log.args.amountsOut
+            .map((amount) => this.vaultUtils.formatTokenAmount(amount, 18))
+            .filter((val): val is string => val !== undefined)
+        : undefined,
+      valuesPerAsset: log.args.valuesPerAsset
+        ? log.args.valuesPerAsset
+            .map((value) => this.vaultUtils.formatTokenAmount(value, 18))
+            .filter((val): val is string => val !== undefined)
+        : undefined,
+      soldAmounts: log.args.soldAmounts
+        ? log.args.soldAmounts
+            .map((amount) => this.vaultUtils.formatTokenAmount(amount, 18))
+            .filter((val): val is string => val !== undefined)
+        : undefined,
       fromIndex: log.args.fromIndex?.toString(),
       toIndex: log.args.toIndex?.toString(),
       moveValue: log.args.moveValue
@@ -708,13 +738,18 @@ export class EventProcessingJob {
         : undefined,
       imbalanceThresholdBps: log.args.imbalanceThresholdBps?.toString(),
       maxPriceStaleness: log.args.maxPriceStaleness?.toString(),
+      hlsBalance: log.args.hlsBalance
+        ? this.vaultUtils.formatTokenAmount(log.args.hlsBalance, 18)
+        : undefined,
       eventHeight: log.args.eventHeight?.toString(),
       etfNonce: log.args.etfNonce?.toString(),
       shareToken: log.args.shareToken ?? undefined,
       depositToken: log.args.depositToken ?? undefined,
       name: log.args.name ?? undefined,
       symbol: log.args.symbol ?? undefined,
-    });
+    };
+
+    await this.eventModel.create(eventData);
   }
 
   /**
@@ -907,8 +942,9 @@ export class EventProcessingJob {
             token: asset.token,
             feed: asset.feed,
             targetWeightBps: asset.targetWeightBps,
-            depositPath: asset.depositPath || [],
-            withdrawPath: asset.withdrawPath || [],
+            v2Path: asset.v2Path || [],
+            v3Path: asset.v3Path || '',
+            v3PoolFee: asset.v3PoolFee || 0,
             symbol: asset.symbol,
             decimals: asset.decimals,
             tvl: portfolio.valuesPerAsset[index] ?? '0',
@@ -1271,6 +1307,7 @@ export class EventProcessingJob {
 
   @Cron('*/12 * * * * *') // Every 12 seconds
   async handleEventProcessing(): Promise<void> {
+    this.logger.log('handleEventProcessing - cron triggered');
     // Check if job is already running
     if (this.isRunning) {
       this.logger.debug('Event job is already running, skipping this execution');

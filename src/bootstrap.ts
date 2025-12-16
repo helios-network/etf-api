@@ -1,7 +1,17 @@
 import cluster from 'cluster';
 import * as os from 'os';
-import { bootstrapWorker } from './main';
 import { clusterLogger } from './common/utils/cluster-logger';
+
+// Set APP_ROLE early, before importing main.ts (which imports AppModule)
+if (cluster.isPrimary) {
+  if (!process.env.APP_ROLE) {
+    process.env.APP_ROLE = 'master';
+  }
+} else {
+  process.env.APP_ROLE = 'worker';
+}
+
+import { bootstrapWorker } from './main';
 
 async function bootstrapMaster(): Promise<void> {
   const appRole = process.env.APP_ROLE;
@@ -38,9 +48,7 @@ async function bootstrap(): Promise<void> {
     const appRole = process.env.APP_ROLE;
     const workerCountEnv = process.env.WORKER_COUNT;
     
-    if (!appRole) {
-      process.env.APP_ROLE = 'master';
-    } else if (appRole !== 'master') {
+    if (appRole && appRole !== 'master') {
       throw new Error(
         `FATAL: Primary process must have APP_ROLE=master, got "${appRole}"`,
       );
