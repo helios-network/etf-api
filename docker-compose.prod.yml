@@ -1,4 +1,4 @@
-# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up
 # Production overrides for docker-compose.yml
 
 services:

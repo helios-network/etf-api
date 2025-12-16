@@ -1,5 +1,5 @@
 # Development overrides for docker-compose.yml
-# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 services:
   redis:
