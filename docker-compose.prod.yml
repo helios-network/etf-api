@@ -55,9 +55,8 @@ services:
       dockerfile: Dockerfile
       target: production
     container_name: etf_app
-    ports: [
+    ports:
       - "${PORT:-3000}:${PORT:-3000}"
-    ] # Pas de port exposé en production (utiliser un reverse proxy)
     environment:
       - NODE_ENV=production
       - PORT=${PORT:-3000}
