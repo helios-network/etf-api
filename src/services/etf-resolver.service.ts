@@ -30,6 +30,8 @@ export class EtfResolverService {
     tokenAddress: `0x${string}`,
   ): Promise<TokenMetadata> {
     try {
+
+      console.log('client.chain', client.chain);
       const [symbol, decimals] = await Promise.all([
         client.readContract({
           address: tokenAddress,

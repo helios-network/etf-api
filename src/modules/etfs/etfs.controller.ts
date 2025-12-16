@@ -41,9 +41,9 @@ export class EtfsController {
   }
 
   @Get('deposit-tokens')
-  async getDepositTokens() {
+  async getDepositTokens(@Query('chainId') chainId: number) {
     try {
-      return await this.etfsService.getDepositTokens();
+      return await this.etfsService.getDepositTokens(chainId);
     } catch (error) {
       throw new HttpException(
         {

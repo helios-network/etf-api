@@ -130,6 +130,7 @@ export class EtfsService {
 
     // Get blockchain client
     const chainId = body.chainId as ChainId;
+    console.log('chainId', chainId);
     const client = this.web3Service.getPublicClient(chainId);
     if (!client) {
       const errorResponse: VerifyErrorResponse = {
@@ -323,7 +324,7 @@ export class EtfsService {
     return successResponse;
   }
 
-  async getDepositTokens() {
+  async getDepositTokens(chainId: number) {
     try {
       // Get all distinct deposit tokens
       const depositTokens = await this.etfModel.distinct('depositToken');
@@ -342,7 +343,7 @@ export class EtfsService {
 
       // Get metadata for each deposit token
       // Use MAINNET as default chain (as in old code)
-      const client = this.web3Service.getPublicClient(ChainId.MAINNET);
+      const client = this.web3Service.getPublicClient(chainId as ChainId);
       if (!client) {
         throw new Error('Mainnet client not available');
       }
