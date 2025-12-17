@@ -327,7 +327,7 @@ export class EtfsService {
   async getDepositTokens(chainId: number) {
     try {
       // Get all distinct deposit tokens
-      const depositTokens = await this.etfModel.distinct('depositToken');
+      const depositTokens = await this.etfModel.find({ chain: chainId }).distinct('depositToken');
 
       // Filter out empty strings
       const validDepositTokens = depositTokens.filter(
