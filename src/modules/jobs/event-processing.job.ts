@@ -12,6 +12,7 @@ import {
 import { Web3Service } from '../../services/web3.service';
 import { VaultUtilsService } from '../../services/vault-utils.service';
 import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
+import { EtfVolumeService } from '../../services/etf-volume.service';
 import { Event, EventDocument } from '../../models/event.schema';
 import {
   ObserveEvents,
@@ -111,6 +112,7 @@ export class EventProcessingJob {
     private readonly web3Service: Web3Service,
     private readonly vaultUtils: VaultUtilsService,
     private readonly walletHoldingUtils: WalletHoldingUtilsService,
+    private readonly etfVolumeService: EtfVolumeService,
   ) {
     this.logger.log('EventProcessingJob constructor called');
   }
@@ -151,6 +153,15 @@ export class EventProcessingJob {
 
       // Update ETF volume traded USD
       etf.volumeTradedUSD = (etf.volumeTradedUSD ?? 0) + depositAmountUSD;
+
+      // Update ETF daily volume USD (24h sliding window)
+      const dailyVolumeUSD = await this.etfVolumeService.addVolume(
+        etf.vault,
+        etf.chain,
+        depositAmountUSD,
+        Date.now(),
+      );
+      etf.dailyVolumeUSD = dailyVolumeUSD;
     }
 
     // Update ETF total supply
@@ -159,7 +170,7 @@ export class EventProcessingJob {
     await this.etfModel.updateOne(
       { _id: etf._id },
       {
-        $set: { volumeTradedUSD: etf.volumeTradedUSD },
+        $set: { volumeTradedUSD: etf.volumeTradedUSD, dailyVolumeUSD: etf.dailyVolumeUSD },
         $inc: { totalSupply: Number(shares) },
       },
     );
@@ -198,6 +209,15 @@ export class EventProcessingJob {
 
       // Update ETF volume traded USD
       etf.volumeTradedUSD = (etf.volumeTradedUSD ?? 0) + depositAmountUSD;
+
+      // Update ETF daily volume USD (24h sliding window)
+      const dailyVolumeUSD = await this.etfVolumeService.addVolume(
+        etf.vault,
+        etf.chain,
+        depositAmountUSD,
+        Date.now(),
+      );
+      etf.dailyVolumeUSD = dailyVolumeUSD;
     }
 
     // Update ETF total supply
@@ -207,7 +227,7 @@ export class EventProcessingJob {
     await this.etfModel.updateOne(
       { _id: etf._id },
       {
-        $set: { totalSupply: newTotalSupply, volumeTradedUSD: etf.volumeTradedUSD },
+        $set: { totalSupply: newTotalSupply, volumeTradedUSD: etf.volumeTradedUSD, dailyVolumeUSD: etf.dailyVolumeUSD },
       },
     );
   }

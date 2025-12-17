@@ -72,6 +72,9 @@ export class ETF {
   volumeTradedUSD: number;
 
   @Prop({ type: Number, default: 0 })
+  dailyVolumeUSD: number;
+
+  @Prop({ type: Number, default: 0 })
   depositCount: number;
 
   @Prop({ type: Number, default: 0 })

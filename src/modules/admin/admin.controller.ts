@@ -2,17 +2,22 @@ import {
   Controller,
   Post,
   Param,
+  Query,
   HttpException,
   HttpStatus,
   Logger,
 } from '@nestjs/common';
 import { VolumeSyncJob } from '../jobs/volume-sync.job';
+import { EtfVolumeService } from '../../services/etf-volume.service';
 
 @Controller('admin')
 export class AdminController {
   private readonly logger = new Logger(AdminController.name);
 
-  constructor(private readonly volumeSyncJob: VolumeSyncJob) {
+  constructor(
+    private readonly volumeSyncJob: VolumeSyncJob,
+    private readonly etfVolumeService: EtfVolumeService,
+  ) {
     this.logger.log('AdminController initialized');
   }
 
@@ -134,6 +139,77 @@ export class AdminController {
         data: {
           wallet,
           ...result,
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('daily-volume-cleanup')
+  async cleanupDailyVolumes() {
+    try {
+      await this.etfVolumeService.cleanupAndRecalculateAll();
+      return {
+        success: true,
+        message: 'Daily volumes cleanup completed',
+      };
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('daily-volume-recalc/:vault')
+  async recalculateDailyVolumeForVault(
+    @Param('vault') vault: string,
+    @Query('chain') chain: string,
+  ) {
+    try {
+      if (!chain) {
+        throw new HttpException(
+          {
+            success: false,
+            error: 'Chain parameter is required',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      const chainId = parseInt(chain, 10);
+      if (isNaN(chainId)) {
+        throw new HttpException(
+          {
+            success: false,
+            error: 'Invalid chain parameter',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      const dailyVolume = await this.etfVolumeService.recalculateForVault(
+        vault,
+        chainId,
+      );
+
+      return {
+        success: true,
+        message: `Daily volume recalculated for vault ${vault} on chain ${chainId}`,
+        data: {
+          vault,
+          chain: chainId,
+          dailyVolumeUSD: dailyVolume,
         },
       };
     } catch (error) {

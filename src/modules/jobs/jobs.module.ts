@@ -18,9 +18,14 @@ import {
   LeaderBoardRewards,
   LeaderBoardRewardsSchema,
 } from '../../models/leader-board-rewards.schema';
+import {
+  EtfVolume,
+  EtfVolumeSchema,
+} from '../../models/etf-volume.schema';
 import { Web3Service } from '../../services/web3.service';
 import { VaultUtilsService } from '../../services/vault-utils.service';
 import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
+import { EtfVolumeService } from '../../services/etf-volume.service';
 import { EventProcessingJob } from './event-processing.job';
 import { ChainlinkSyncJob } from './chainlink-sync.job';
 import { RewardDistributionJob } from './reward-distribution.job';
@@ -35,12 +40,14 @@ import { VolumeSyncJob } from './volume-sync.job';
       { name: WalletHolding.name, schema: WalletHoldingSchema },
       { name: ChainlinkDataFeed.name, schema: ChainlinkDataFeedSchema },
       { name: LeaderBoardRewards.name, schema: LeaderBoardRewardsSchema },
+      { name: EtfVolume.name, schema: EtfVolumeSchema },
     ]),
   ],
   providers: [
     Web3Service,
     VaultUtilsService,
     WalletHoldingUtilsService,
+    EtfVolumeService,
     EventProcessingJob,
     ChainlinkSyncJob,
     RewardDistributionJob,

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
@@ -9,6 +10,7 @@ import { Event, EventDocument } from '../../models/event.schema';
 import { ETF, ETFDocument } from '../../models/etf.schema';
 import { TRANSACTION_POINTS } from '../../constants/transaction-points';
 import { normalizeEthAddress } from '../../common/utils/eip55';
+import { EtfVolumeService } from '../../services/etf-volume.service';
 
 const BATCH_SIZE = 100; // Number of wallets to process per batch
 
@@ -23,6 +25,7 @@ export class VolumeSyncJob {
     private eventModel: Model<EventDocument>,
     @InjectModel(ETF.name)
     private etfModel: Model<ETFDocument>,
+    private readonly etfVolumeService: EtfVolumeService,
   ) {}
 
   /**
@@ -478,5 +481,20 @@ export class VolumeSyncJob {
       transactionCounts: counts,
       pointsByType,
     };
+  }
+
+  /**
+   * Cleanup daily volumes and recalculate dailyVolumeUSD for all ETFs
+   * Runs every hour to ensure consistency
+   */
+  @Cron('0 0 * * * *') // Every hour at minute 0
+  async cleanupDailyVolumes(): Promise<void> {
+    this.logger.log('Starting daily volumes cleanup...');
+    try {
+      await this.etfVolumeService.cleanupAndRecalculateAll();
+      this.logger.log('Daily volumes cleanup completed successfully');
+    } catch (error) {
+      this.logger.error('Error in daily volumes cleanup:', error);
+    }
   }
 }
