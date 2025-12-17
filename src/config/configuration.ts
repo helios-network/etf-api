@@ -38,6 +38,10 @@ export interface AppConfig {
   cors: CorsConfig;
   rateLimit: RateLimitConfig;
   privateKey?: string;
+  rpcUrls?: {
+    mainnet?: string;
+    arbitrum?: string;
+  };
   debugTvl: boolean;
 }
 
@@ -90,6 +94,10 @@ export default (): AppConfig => {
     namespace: process.env.RATE_LIMIT_NAMESPACE || 'ratelimit',
   },
   privateKey: process.env.PRIVATE_KEY,
+  rpcUrls: {
+    mainnet: process.env.RPC_URL_MAINNET,
+    arbitrum: process.env.RPC_URL_ARBITRUM,
+  },
   debugTvl:
     process.env.DEBUG_TVL === 'true' ||
     process.env.DEBUG_TVL === '1' ||

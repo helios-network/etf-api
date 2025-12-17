@@ -19,15 +19,29 @@ export class Web3Service {
   private readonly privateKey: `0x${string}` | undefined;
 
   constructor(private readonly configService: ConfigService) {
+    const rpcUrls = this.configService.get<{ mainnet?: string; arbitrum?: string }>('rpcUrls');
+
+    const getRpcUrl = (chainId: ChainId): string => {
+      if (chainId === ChainId.MAINNET && rpcUrls?.mainnet) {
+        return rpcUrls.mainnet;
+      }
+      if (chainId === ChainId.ARBITRUM && rpcUrls?.arbitrum) {
+        return rpcUrls.arbitrum;
+      }
+      return DEFAULT_RPC_URLS[chainId];
+    };
+
     // Initialize public clients
+    const mainnetRpcUrl = getRpcUrl(ChainId.MAINNET);
+    const arbitrumRpcUrl = getRpcUrl(ChainId.ARBITRUM);
     this.publicClients = {
       [ChainId.MAINNET]: createPublicClient({
         chain: mainnet,
-        transport: http(DEFAULT_RPC_URLS[ChainId.MAINNET]),
+        transport: http(mainnetRpcUrl),
       }),
       [ChainId.ARBITRUM]: createPublicClient({
         chain: arbitrum,
-        transport: http(DEFAULT_RPC_URLS[ChainId.ARBITRUM]),
+        transport: http(arbitrumRpcUrl),
       }),
     };
 
@@ -35,11 +49,11 @@ export class Web3Service {
     this.walletClients = {
       [ChainId.MAINNET]: createWalletClient({
         chain: mainnet,
-        transport: http(DEFAULT_RPC_URLS[ChainId.MAINNET]),
+        transport: http(getRpcUrl(ChainId.MAINNET)),
       }),
       [ChainId.ARBITRUM]: createWalletClient({
         chain: arbitrum,
-        transport: http(DEFAULT_RPC_URLS[ChainId.ARBITRUM]),
+        transport: http(getRpcUrl(ChainId.ARBITRUM)),
       }),
     };
 

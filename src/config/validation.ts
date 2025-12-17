@@ -28,6 +28,14 @@ export const validationSchema = Joi.object({
   PRIVATE_KEY: Joi.string()
     .optional()
     .allow(''),
+  RPC_URL_MAINNET: Joi.string()
+    .uri()
+    .optional()
+    .allow(''),
+  RPC_URL_ARBITRUM: Joi.string()
+    .uri()
+    .optional()
+    .allow(''),
   DEBUG_TVL: Joi.string()
     .valid('true', 'false', '1', '0')
     .optional(),
