@@ -373,7 +373,7 @@ export class EtfsService {
 
       return {
         success: true,
-        data: depositTokenMetadata,
+        data: depositTokenMetadata.filter((metadata) => metadata.symbol !== ''),
       };
     } catch (error) {
       this.logger.error('Error fetching deposit tokens:', error);
