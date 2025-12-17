@@ -36,6 +36,24 @@ export const validationSchema = Joi.object({
   RPC_RETRY_MAX_RETRIES: Joi.number().min(0).default(5),
   RPC_RETRY_BASE_DELAY: Joi.number().min(100).default(1000),
   RPC_RETRY_MAX_DELAY: Joi.number().min(1000).default(300000),
+  RPC_MAINNET_URLS: Joi.string()
+    .optional()
+    .description('Comma-separated list of Mainnet RPC URLs'),
+  RPC_ARBITRUM_URLS: Joi.string()
+    .optional()
+    .description('Comma-separated list of Arbitrum RPC URLs'),
+  RPC_HEALTH_MAX_CONSECUTIVE_ERRORS: Joi.number()
+    .min(1)
+    .default(3)
+    .description('Maximum consecutive errors before marking RPC as unhealthy'),
+  RPC_HEALTH_RATE_LIMIT_COOLDOWN_MS: Joi.number()
+    .min(1000)
+    .default(60000)
+    .description('Cooldown period in ms after rate limit (429) error'),
+  RPC_HEALTH_ERROR_RECOVERY_DELAY_MS: Joi.number()
+    .min(1000)
+    .default(60000)
+    .description('Recovery delay in ms before retrying unhealthy RPC'),
   PRIVATE_KEY: Joi.string()
     .optional()
     .allow(''),

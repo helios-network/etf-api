@@ -8,8 +8,9 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet, arbitrum } from 'viem/chains';
-import { ChainId, DEFAULT_RPC_URLS } from '../config/web3';
-import { createRateLimitedTransport } from './rpc-rate-limit/transport-wrapper';
+import { ChainId } from '../config/web3';
+import { RpcRotationService } from './rpc-rate-limit/rpc-rotation.service';
+import { createRotatingTransport } from './rpc-rate-limit/transport-wrapper';
 
 @Injectable()
 export class Web3Service {
@@ -18,8 +19,10 @@ export class Web3Service {
   private readonly walletClients: Record<ChainId, WalletClient>;
   private readonly privateKey: `0x${string}` | undefined;
 
-  constructor(private readonly configService: ConfigService) {
-    // Get RPC config for retry settings
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly rpcRotationService: RpcRotationService,
+  ) {
     const rpcConfig = this.configService.get<any>('rpc');
     const retryConfig = rpcConfig?.retry || {
       maxRetries: 5,
@@ -27,37 +30,39 @@ export class Web3Service {
       maxDelay: 300000,
     };
 
-    // Initialize public clients with rate-limited transport
     this.publicClients = {
       [ChainId.MAINNET]: createPublicClient({
         chain: mainnet,
-        transport: createRateLimitedTransport(
-          DEFAULT_RPC_URLS[ChainId.MAINNET],
+        transport: createRotatingTransport(
+          ChainId.MAINNET,
+          this.rpcRotationService,
           retryConfig,
         ),
       }),
       [ChainId.ARBITRUM]: createPublicClient({
         chain: arbitrum,
-        transport: createRateLimitedTransport(
-          DEFAULT_RPC_URLS[ChainId.ARBITRUM],
+        transport: createRotatingTransport(
+          ChainId.ARBITRUM,
+          this.rpcRotationService,
           retryConfig,
         ),
       }),
     };
 
-    // Initialize wallet clients with rate-limited transport
     this.walletClients = {
       [ChainId.MAINNET]: createWalletClient({
         chain: mainnet,
-        transport: createRateLimitedTransport(
-          DEFAULT_RPC_URLS[ChainId.MAINNET],
+        transport: createRotatingTransport(
+          ChainId.MAINNET,
+          this.rpcRotationService,
           retryConfig,
         ),
       }),
       [ChainId.ARBITRUM]: createWalletClient({
         chain: arbitrum,
-        transport: createRateLimitedTransport(
-          DEFAULT_RPC_URLS[ChainId.ARBITRUM],
+        transport: createRotatingTransport(
+          ChainId.ARBITRUM,
+          this.rpcRotationService,
           retryConfig,
         ),
       }),

@@ -1,4 +1,5 @@
 import * as os from 'os';
+import { ChainId, DEFAULT_RPC_URLS } from './web3';
 
 export interface DatabaseConfig {
   mongodb: {
@@ -41,12 +42,19 @@ export interface RpcRetryConfig {
   maxDelay: number;
 }
 
+export interface RpcHealthConfig {
+  maxConsecutiveErrors: number;
+  rateLimitCooldownMs: number;
+  errorRecoveryDelayMs: number;
+}
+
 export interface RpcConfig {
   rateLimits: {
     1: RpcRateLimitConfig; // MAINNET
     42161: RpcRateLimitConfig; // ARBITRUM
   };
   retry: RpcRetryConfig;
+  health: RpcHealthConfig;
 }
 
 export interface AppConfig {
@@ -60,9 +68,9 @@ export interface AppConfig {
   rateLimit: RateLimitConfig;
   rpc: RpcConfig;
   privateKey?: string;
-  rpcUrls?: {
-    mainnet?: string;
-    arbitrum?: string;
+  rpcUrls: {
+    [ChainId.MAINNET]: string[];
+    [ChainId.ARBITRUM]: string[];
   };
   debugTvl: boolean;
 }
@@ -85,6 +93,16 @@ function parseRateLimitConfig(config: string): RpcRateLimitConfig {
     maxRequests,
     windowMs: windowSeconds * 1000,
   };
+}
+
+function parseRpcUrls(envVar: string | undefined, defaultUrl: string): string[] {
+  if (!envVar || envVar.trim() === '') {
+    return [defaultUrl];
+  }
+  return envVar
+    .split(',')
+    .map((url) => url.trim())
+    .filter((url) => url.length > 0);
 }
 
 export default (): AppConfig => {
@@ -147,6 +165,30 @@ export default (): AppConfig => {
       baseDelay: parseInt(process.env.RPC_RETRY_BASE_DELAY || '1000', 10),
       maxDelay: parseInt(process.env.RPC_RETRY_MAX_DELAY || '300000', 10),
     },
+    health: {
+      maxConsecutiveErrors: parseInt(
+        process.env.RPC_HEALTH_MAX_CONSECUTIVE_ERRORS || '3',
+        10,
+      ),
+      rateLimitCooldownMs: parseInt(
+        process.env.RPC_HEALTH_RATE_LIMIT_COOLDOWN_MS || '60000',
+        10,
+      ),
+      errorRecoveryDelayMs: parseInt(
+        process.env.RPC_HEALTH_ERROR_RECOVERY_DELAY_MS || '60000',
+        10,
+      ),
+    },
+  },
+  rpcUrls: {
+    [ChainId.MAINNET]: parseRpcUrls(
+      process.env.RPC_MAINNET_URLS,
+      DEFAULT_RPC_URLS[ChainId.MAINNET],
+    ),
+    [ChainId.ARBITRUM]: parseRpcUrls(
+      process.env.RPC_ARBITRUM_URLS,
+      DEFAULT_RPC_URLS[ChainId.ARBITRUM],
+    ),
   },
   privateKey: process.env.PRIVATE_KEY,
   debugTvl:

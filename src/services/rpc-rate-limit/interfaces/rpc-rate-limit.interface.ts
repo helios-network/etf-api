@@ -1,37 +1,42 @@
 import { ChainId } from '../../../config/web3';
 
-/**
- * Configuration pour les limites de taux RPC par chaîne
- */
 export interface RpcRateLimitConfig {
   maxRequests: number;
   windowMs: number;
 }
 
-/**
- * Configuration pour les retries RPC
- */
 export interface RpcRetryConfig {
   maxRetries: number;
-  baseDelay: number; // en millisecondes
-  maxDelay: number; // en millisecondes
+  baseDelay: number;
+  maxDelay: number;
 }
 
-/**
- * Configuration complète RPC
- */
+export interface RpcHealthConfig {
+  maxConsecutiveErrors: number;
+  rateLimitCooldownMs: number;
+  errorRecoveryDelayMs: number;
+}
+
 export interface RpcConfig {
   rateLimits: Record<ChainId, RpcRateLimitConfig>;
   retry: RpcRetryConfig;
+  health: RpcHealthConfig;
 }
 
-/**
- * Résultat d'une vérification de rate limit
- */
 export interface RateLimitCheckResult {
   allowed: boolean;
   limit: number;
   remaining: number;
-  reset: number; // timestamp en millisecondes
-  waitTime?: number; // temps d'attente en ms si limite atteinte
+  reset: number;
+  waitTime?: number;
+}
+
+export interface RpcHealthState {
+  url: string;
+  chainId: ChainId;
+  consecutiveErrors: number;
+  lastUsed: number;
+  lastError: number | null;
+  rateLimitedUntil: number | null;
+  isHealthy: boolean;
 }

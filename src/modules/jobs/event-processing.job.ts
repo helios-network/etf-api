@@ -558,8 +558,7 @@ export class EventProcessingJob {
 
       this.logger.log(`ETF created: ${normalizedVault} (${name}/${symbol})`);
     } catch (error) {
-      this.logger.error(`Error fetching vault config for ${normalizedVault}:`, error);
-      // If we can't fetch vault config, we can't verify the depositToken, so reject the event
+      this.logger.error(`Error fetching vault config for ${normalizedVault}`);
       this.logger.warn(
         `Ignoring ETFCreated event for vault ${normalizedVault}: unable to verify depositToken authorization`,
       );
@@ -612,10 +611,7 @@ export class EventProcessingJob {
           (walletHolding.rebalanceCount ?? 0) + 1;
       }
     } catch (error) {
-      this.logger.error(
-        `Error finding wallets for rebalance event in vault ${normalizedVault}:`,
-        error,
-      );
+      this.logger.error(`Error finding wallets for rebalance event in vault ${normalizedVault}`);
     }
 
     // TODO: save liquidity tvl on the etf
@@ -717,7 +713,6 @@ export class EventProcessingJob {
     }
 
     if (noncesFound.length === noncesResearched.length) {
-      this.logger.debug('All nonces found early - optimized RPC calls');
       return newEvents;
     }
 
@@ -745,7 +740,6 @@ export class EventProcessingJob {
     }
 
     if (noncesFound.length === noncesResearched.length) {
-      this.logger.debug('All nonces found early - optimized RPC calls');
       return newEvents;
     }
     // 3. ETFCreated events
@@ -772,7 +766,6 @@ export class EventProcessingJob {
     }
 
     if (noncesFound.length === noncesResearched.length) {
-      this.logger.debug('All nonces found early - optimized RPC calls');
       return newEvents;
     }
 
@@ -800,7 +793,6 @@ export class EventProcessingJob {
     }
 
     if (noncesFound.length === noncesResearched.length) {
-      this.logger.debug('All nonces found early - optimized RPC calls');
       return newEvents;
     }
 
@@ -1126,7 +1118,7 @@ export class EventProcessingJob {
           latestBlock,
         );
       } catch (error) {
-        this.logger.error(`Error processing event ${log.eventName}:`, error);
+        this.logger.error(`Error processing event ${log.eventName}`);
         // Continue processing other events even if one fails
         log.skipped = true;
         await this.saveEvent(log, chainId);
@@ -1212,10 +1204,7 @@ export class EventProcessingJob {
           `Updated portfolio for ETF ${etf.vault}: TVL=${portfolio.totalValue}, NAV=${portfolio.nav}`,
         );
       } catch (error) {
-        this.logger.error(
-          `Error updating portfolio for ETF ${vaultAddress}:`,
-          error,
-        );
+        this.logger.error(`Error updating portfolio for ETF ${vaultAddress}`);
       }
     }
   }
@@ -1232,7 +1221,6 @@ export class EventProcessingJob {
     ethBlockConfirmationDelay: bigint,
   ): Promise<{ lastObservedEthHeight: bigint; error?: Error }> {
     if (targetHeight - lastObservedEthHeight === 0n) {
-      this.logger.debug(`No blocks to sync on chain ${chainId}`);
       return { lastObservedEthHeight: targetHeight };
     }
 
@@ -1264,7 +1252,7 @@ export class EventProcessingJob {
           'No contract code at given address, rotating RPC might be needed',
         );
       }
-      this.logger.error(`Failed to get last event nonce on chain ${chainId}:`, error);
+      this.logger.error(`Failed to get last event nonce on chain ${chainId}`);
       return { lastObservedEthHeight, error: error as Error };
     }
 
@@ -1318,12 +1306,11 @@ export class EventProcessingJob {
         noncesResearched,
       );
     } catch (error) {
-      this.logger.error(`Failed to get events on chain ${chainId}:`, error);
-      return { lastObservedEthHeight, error: error as Error };
+      this.logger.error(`Failed to get events on chain ${chainId}`);
+      return { lastObservedEthHeight, error: new Error('Failed to get events') };
     }
 
     const newEvents = this.filterEvents(events, lastObservedEventNonce);
-    this.logger.debug(`Found ${newEvents.length} new events on chain ${chainId} (from ${events.length} total)`);
 
     // Sort events by nonce
     newEvents.sort((a, b) => {
@@ -1476,7 +1463,7 @@ export class EventProcessingJob {
         () => client.getBlockNumber(),
       );
     } catch (error) {
-      this.logger.error(`Failed to get latest height on chain ${chainId}:`, error);
+      this.logger.error(`Failed to get latest height on chain ${chainId}`);
       return;
     }
 
@@ -1486,7 +1473,6 @@ export class EventProcessingJob {
 
     // not enough blocks on ethereum yet
     if (targetHeight <= ethBlockConfirmationDelay) {
-      this.logger.debug(`Not enough blocks on chain ${chainId} yet`);
       return;
     }
 
@@ -1494,7 +1480,6 @@ export class EventProcessingJob {
     targetHeight = targetHeight - ethBlockConfirmationDelay;
 
     if (targetHeight <= lastObservedEthHeight) {
-      this.logger.debug(`Chain ${chainId} synced (${lastObservedEthHeight} -> ${targetHeight})`);
       return;
     }
 
@@ -1541,8 +1526,7 @@ export class EventProcessingJob {
             // Continue the loop to retry
             continue;
           } else {
-            // Other errors, return
-            this.logger.error('Error in syncToTargetHeight:', result.error);
+            this.logger.error(`Error syncing chain ${chainId}`);
             return;
           }
         }
@@ -1600,8 +1584,7 @@ export class EventProcessingJob {
             // Continue the loop to retry
             continue;
           } else {
-            // Other errors, return
-            this.logger.error('Error in syncToTargetHeight:', result.error);
+            this.logger.error(`Error syncing chain ${chainId}`);
             return;
           }
         }
@@ -1776,13 +1759,10 @@ export class EventProcessingJob {
           );
           // Don't crash the job, it will retry on next execution
         } else {
-          this.logger.error(
-            `Error in event processing job: ${error.message}`,
-            error.stack,
-          );
+          this.logger.error(`Error in event processing job: ${error.message}`);
         }
       } else {
-        this.logger.error('Unknown error in event processing job:', error);
+        this.logger.error(`Unknown error in event processing job`);
       }
       // Job will continue on next cron execution
     } finally {
