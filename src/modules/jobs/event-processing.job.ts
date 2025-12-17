@@ -8,6 +8,7 @@ import { ChainId } from '../../config/web3';
 import {
   ETF_CONTRACT_ADDRS,
   DEFAULT_START_BLOCKS,
+  AUTORIZED_DEPOSIT_TOKENS,
 } from '../../constants';
 import { Web3Service } from '../../services/web3.service';
 import { VaultUtilsService } from '../../services/vault-utils.service';
@@ -319,10 +320,10 @@ export class EventProcessingJob {
     chainId: ChainId,
     client: PublicClient,
     holdingsMap: Map<string, WalletHoldingData>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const { vault, user, sharesOut } = log.args;
 
-    if (!vault || !user || !sharesOut) return;
+    if (!vault || !user || !sharesOut) return false;
 
     const normalizedVault = normalizeEthAddress(vault);
     const normalizedUser = normalizeEthAddress(user);
@@ -334,8 +335,8 @@ export class EventProcessingJob {
     const etf = await this.etfModel.findOne({ vault: normalizedVault });
 
     if (!etf) {
-      this.logger.warn(`ETF not found for vault ${vault}`);
-      return;
+      this.logger.warn(`ETF not found for vault ${normalizedVault}`);
+      return false;
     }
 
     // Find existing deposit
@@ -376,6 +377,7 @@ export class EventProcessingJob {
     
     // Apply middlewares
     await this.middlewareAfterDeposit(sharesOut, walletHolding, etf, client);
+    return true;
   }
 
   /**
@@ -386,10 +388,10 @@ export class EventProcessingJob {
     chainId: ChainId,
     client: PublicClient,
     holdingsMap: Map<string, WalletHoldingData>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const { vault, user, sharesIn } = log.args;
 
-    if (!vault || !user || !sharesIn) return;
+    if (!vault || !user || !sharesIn) return false;
 
     const normalizedVault = normalizeEthAddress(vault);
     const normalizedUser = normalizeEthAddress(user);
@@ -401,8 +403,8 @@ export class EventProcessingJob {
     const etf = await this.etfModel.findOne({ vault: normalizedVault });
 
     if (!etf) {
-      this.logger.warn(`ETF not found for vault ${vault}`);
-      return;
+      this.logger.warn(`ETF not found for vault ${normalizedVault}`);
+      return false;
     }
 
     // Find existing deposit
@@ -448,6 +450,7 @@ export class EventProcessingJob {
     
     // Apply middlewares
     await this.middlewareAfterRedeem(sharesIn, walletHolding, etf, client);
+    return true;
   }
 
   /**
@@ -458,7 +461,7 @@ export class EventProcessingJob {
     chainId: ChainId,
     client: PublicClient,
     holdingsMap: Map<string, WalletHoldingData>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const {
       vault,
       eventNonce,
@@ -469,9 +472,10 @@ export class EventProcessingJob {
       symbol,
     } = log.args;
 
-    if (!vault) return;
+    if (!vault || !shareToken) return false;
 
     const normalizedVault = normalizeEthAddress(vault);
+    const normalizedShareToken = normalizeEthAddress(shareToken);
 
     // Try to get the creator wallet from transaction
     if (log.transactionHash) {
@@ -496,7 +500,22 @@ export class EventProcessingJob {
       const vaultConfig = await this.vaultUtils.fetchVaultConfig(
         client,
         vault,
+        shareToken,
       );
+
+      // Check if depositToken is authorized
+      const normalizedDepositToken = normalizeEthAddress(vaultConfig.depositToken);
+      const authorizedTokens = AUTORIZED_DEPOSIT_TOKENS[chainId] || [];
+      const isAuthorized = authorizedTokens.some(
+        (token) => normalizeEthAddress(token) === normalizedDepositToken,
+      );
+
+      if (!isAuthorized) {
+        this.logger.warn(
+          `Ignoring ETFCreated event for vault ${normalizedVault}: depositToken ${normalizedDepositToken} is not authorized on chain ${chainId}`,
+        );
+        return false;
+      }
 
       // Create new ETF entry with vault configuration
       await this.etfModel.create({
@@ -505,7 +524,7 @@ export class EventProcessingJob {
         pricer: vaultConfig.pricer,
         pricingMode: vaultConfig.pricingMode,
         chain: Number(chainId),
-        shareToken: vaultConfig.shareToken,
+        shareToken: normalizedShareToken,
         depositToken: vaultConfig.depositToken,
         name: name ?? '',
         symbol: symbol ?? '',
@@ -526,21 +545,14 @@ export class EventProcessingJob {
       this.logger.log(`ETF created: ${normalizedVault} (${name}/${symbol})`);
     } catch (error) {
       this.logger.error(`Error fetching vault config for ${normalizedVault}:`, error);
-      // Still create ETF entry with basic info from event
-      await this.etfModel.create({
-        vault: normalizedVault,
-        chain: Number(chainId),
-        shareToken: shareToken ?? '',
-        depositToken: '',
-        name: name ?? '',
-        symbol: symbol ?? '',
-        tvl: 0,
-        totalSupply: 0,
-        eventNonce: (eventNonce ?? 0n).toString(),
-        eventHeight: (eventHeight ?? 0n).toString(),
-        etfNonce: (etfNonce ?? 0n).toString(),
-      });
+      // If we can't fetch vault config, we can't verify the depositToken, so reject the event
+      this.logger.warn(
+        `Ignoring ETFCreated event for vault ${normalizedVault}: unable to verify depositToken authorization`,
+      );
+      return false;
     }
+
+    return true;
   }
 
   /**
@@ -551,12 +563,20 @@ export class EventProcessingJob {
     chainId: ChainId,
     client: PublicClient,
     holdingsMap: Map<string, WalletHoldingData>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const { vault } = log.args;
 
-    if (!vault) return;
+    if (!vault) return false;
 
     const normalizedVault = normalizeEthAddress(vault);
+
+    // Get ETF from database
+    const etf = await this.etfModel.findOne({ vault: normalizedVault });
+
+    if (!etf) {
+      this.logger.warn(`ETF not found for vault ${normalizedVault}, ignoring Rebalance event`);
+      return false;
+    }
 
     // Find all wallets that have deposits in this vault
     try {
@@ -585,6 +605,7 @@ export class EventProcessingJob {
     }
 
     // TODO: save liquidity tvl on the etf
+    return true;
   }
 
   /**
@@ -594,12 +615,23 @@ export class EventProcessingJob {
     log: EventLog,
     chainId: ChainId,
     client: PublicClient,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const { vault } = log.args;
 
-    if (!vault) return;
+    if (!vault) return false;
+
+    const normalizedVault = normalizeEthAddress(vault);
+
+    // Get ETF from database
+    const etf = await this.etfModel.findOne({ vault: normalizedVault });
+
+    if (!etf) {
+      this.logger.warn(`ETF not found for vault ${normalizedVault}, ignoring ParamsUpdated event`);
+      return false;
+    }
 
     // TODO: handle params update
+    return true;
   }
 
   /**
@@ -964,34 +996,40 @@ export class EventProcessingJob {
   ): Promise<void> {
     for (const log of events) {
       try {
+        let eventProcessed = false;
+
         // Process the event
         switch (log.eventName) {
           case 'Deposit':
-            await this.processDepositEvent(log, chainId, client, holdingsMap);
+            eventProcessed = await this.processDepositEvent(log, chainId, client, holdingsMap);
             // Save wallet holding if it was modified
-            const depositUser = log.args.user;
-            if (depositUser) {
-              const walletHolding = holdingsMap.get(depositUser);
-              if (walletHolding) {
-                await this.saveWalletHolding(walletHolding, existingWalletSet);
+            if (eventProcessed) {
+              const depositUser = log.args.user;
+              if (depositUser) {
+                const walletHolding = holdingsMap.get(depositUser);
+                if (walletHolding) {
+                  await this.saveWalletHolding(walletHolding, existingWalletSet);
+                }
               }
             }
             break;
           case 'Redeem':
-            await this.processRedeemEvent(log, chainId, client, holdingsMap);
+            eventProcessed = await this.processRedeemEvent(log, chainId, client, holdingsMap);
             // Save wallet holding if it was modified
-            const redeemUser = log.args.user;
-            if (redeemUser) {
-              const walletHolding = holdingsMap.get(redeemUser);
-              if (walletHolding) {
-                await this.saveWalletHolding(walletHolding, existingWalletSet);
+            if (eventProcessed) {
+              const redeemUser = log.args.user;
+              if (redeemUser) {
+                const walletHolding = holdingsMap.get(redeemUser);
+                if (walletHolding) {
+                  await this.saveWalletHolding(walletHolding, existingWalletSet);
+                }
               }
             }
             break;
           case 'ETFCreated':
-            await this.processETFCreatedEvent(log, chainId, client, holdingsMap);
+            eventProcessed = await this.processETFCreatedEvent(log, chainId, client, holdingsMap);
             // Save wallet holdings that were modified (if any)
-            if (log.transactionHash) {
+            if (eventProcessed && log.transactionHash) {
               try {
                 const tx = await client.getTransaction({ hash: log.transactionHash });
                 if (tx.from) {
@@ -1006,41 +1044,45 @@ export class EventProcessingJob {
             }
             break;
           case 'Rebalance':
-            await this.processRebalanceEvent(log, chainId, client, holdingsMap);
+            eventProcessed = await this.processRebalanceEvent(log, chainId, client, holdingsMap);
             // Save all wallet holdings that were modified
-            const { vault } = log.args;
-            if (vault) {
-              try {
-                const normalizedVault = normalizeEthAddress(vault);
-                const walletHoldings = await this.walletHoldingModel
-                  .find({
-                    'deposits.etfVaultAddress': normalizedVault,
-                    'deposits.chain': Number(chainId),
-                  })
-                  .lean()
-                  .exec();
-                for (const holding of walletHoldings) {
-                  const walletHolding = holdingsMap.get(holding.wallet);
-                  if (walletHolding) {
-                    await this.saveWalletHolding(walletHolding, existingWalletSet);
+            if (eventProcessed) {
+              const { vault } = log.args;
+              if (vault) {
+                try {
+                  const normalizedVault = normalizeEthAddress(vault);
+                  const walletHoldings = await this.walletHoldingModel
+                    .find({
+                      'deposits.etfVaultAddress': normalizedVault,
+                      'deposits.chain': Number(chainId),
+                    })
+                    .lean()
+                    .exec();
+                  for (const holding of walletHoldings) {
+                    const walletHolding = holdingsMap.get(holding.wallet);
+                    if (walletHolding) {
+                      await this.saveWalletHolding(walletHolding, existingWalletSet);
+                    }
                   }
+                } catch (error) {
+                  // Error already logged in processRebalanceEvent
                 }
-              } catch (error) {
-                // Error already logged in processRebalanceEvent
               }
             }
             break;
           case 'ParamsUpdated':
-            await this.processParamsUpdatedEvent(log, chainId, client);
+            eventProcessed = await this.processParamsUpdatedEvent(log, chainId, client);
             break;
           default:
             this.logger.warn(`Unknown event type: ${log.eventName}`);
         }
 
-        // Save the event
-        await this.saveEvent(log, chainId);
+        // Save the event only if it was successfully processed
+        if (eventProcessed) {
+          await this.saveEvent(log, chainId);
+        }
 
-        // Update observed nonce after each event
+        // Update observed nonce after each event (even if ignored, to prevent reprocessing)
         const eventNonce = log.args.eventNonce ?? log.args.nonce ?? 0n;
         await this.updateObservedNonce(
           chainId,

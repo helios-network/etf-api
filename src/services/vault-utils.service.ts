@@ -16,6 +16,7 @@ export class VaultUtilsService {
   async fetchVaultConfig(
     client: PublicClient,
     vaultAddress: `0x${string}`,
+    shareToken: `0x${string}`,
   ): Promise<{
     factory: string;
     owner: string;
@@ -41,7 +42,6 @@ export class VaultUtilsService {
       'function owner() view returns (address)',
       'function depositToken() view returns (address)',
       'function depositFeed() view returns (address)',
-      'function shareToken() view returns (address)',
       'function assetCount() view returns (uint256)',
       'function imbalanceThresholdBps() view returns (uint256)',
       'function pricer() view returns (address)',
@@ -52,7 +52,6 @@ export class VaultUtilsService {
       owner,
       depositToken,
       depositFeed,
-      shareToken,
       assetsLength,
       imbalanceThresholdBps,
       pricer,
@@ -76,11 +75,6 @@ export class VaultUtilsService {
         address: vaultAddress,
         abi: vaultAbi,
         functionName: 'depositFeed',
-      }),
-      client.readContract({
-        address: vaultAddress,
-        abi: vaultAbi,
-        functionName: 'shareToken',
       }),
       client.readContract({
         address: vaultAddress,
