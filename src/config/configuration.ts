@@ -1,5 +1,10 @@
 import * as os from 'os';
-import { ChainId, DEFAULT_RPC_URLS } from './web3';
+import { ChainId } from './web3';
+
+const DEFAULT_RPC_URLS = {
+  [ChainId.MAINNET]: 'https://ethereum-rpc.publicnode.com',
+  [ChainId.ARBITRUM]: 'https://arbitrum-one-rpc.publicnode.com',
+};
 
 export interface DatabaseConfig {
   mongodb: {
