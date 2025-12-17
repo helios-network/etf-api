@@ -159,6 +159,7 @@ export class EventProcessingJob {
     await this.etfModel.updateOne(
       { _id: etf._id },
       {
+        $set: { volumeTradedUSD: etf.volumeTradedUSD },
         $inc: { totalSupply: Number(shares) },
       },
     );
@@ -206,7 +207,7 @@ export class EventProcessingJob {
     await this.etfModel.updateOne(
       { _id: etf._id },
       {
-        $set: { totalSupply: newTotalSupply },
+        $set: { totalSupply: newTotalSupply, volumeTradedUSD: etf.volumeTradedUSD },
       },
     );
   }
