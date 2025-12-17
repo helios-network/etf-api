@@ -121,7 +121,7 @@ export class LeaderBoardService {
       },
       {
         namespace: 'leaderboard',
-        ttl: 600, // 10 minutes
+        ttl: 10,
       },
     );
   }
