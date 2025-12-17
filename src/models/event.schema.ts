@@ -5,6 +5,9 @@ export type EventDocument = Event & Document;
 
 @Schema({ timestamps: true })
 export class Event {
+  @Prop({ required: false })
+  skipped?: boolean;
+
   @Prop({
     type: String,
     enum: ['Deposit', 'Redeem', 'ETFCreated', 'Rebalance', 'ParamsUpdated'],

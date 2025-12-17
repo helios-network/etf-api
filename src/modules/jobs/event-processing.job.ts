@@ -812,6 +812,7 @@ export class EventProcessingJob {
     const shareTokenDecimals = etf?.shareDecimals ?? 18;
 
     const eventData: Partial<Event> = {
+      skipped: log.skipped ?? false,
       type: log.eventName,
       chain: Number(chainId),
       user: log.args.user ? normalizeEthAddress(log.args.user) : undefined,
