@@ -148,6 +148,9 @@ export class EventProcessingJob {
       if (walletHolding.volumeTradedUSD < 0) {
         walletHolding.volumeTradedUSD = 0;
       }
+
+      // Update ETF volume traded USD
+      etf.volumeTradedUSD = (etf.volumeTradedUSD ?? 0) + depositAmountUSD;
     }
 
     // Update ETF total supply
@@ -186,11 +189,14 @@ export class EventProcessingJob {
       const currentVolume = walletHolding.volumeTradedUSD;
 
       walletHolding.volumeTradedUSD = Number(
-        (currentVolume - depositAmountUSD).toFixed(2),
+        (currentVolume + depositAmountUSD).toFixed(2),
       );
       if (walletHolding.volumeTradedUSD < 0) {
         walletHolding.volumeTradedUSD = 0;
       }
+
+      // Update ETF volume traded USD
+      etf.volumeTradedUSD = (etf.volumeTradedUSD ?? 0) + depositAmountUSD;
     }
 
     // Update ETF total supply
