@@ -37,6 +37,7 @@ const AVERAGE_BLOCK_TIME_MS: Record<ChainId, bigint> = {
 };
 
 type EventLog = {
+  skipped?: boolean;
   eventName: string;
   args: {
     user?: string;
@@ -1078,9 +1079,11 @@ export class EventProcessingJob {
         }
 
         // Save the event only if it was successfully processed
-        if (eventProcessed) {
-          await this.saveEvent(log, chainId);
+        if (!eventProcessed) {
+          log.skipped = true;
         }
+
+        await this.saveEvent(log, chainId);
 
         // Update observed nonce after each event (even if ignored, to prevent reprocessing)
         const eventNonce = log.args.eventNonce ?? log.args.nonce ?? 0n;
