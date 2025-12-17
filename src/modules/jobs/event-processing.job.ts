@@ -1097,6 +1097,15 @@ export class EventProcessingJob {
       } catch (error) {
         this.logger.error(`Error processing event ${log.eventName}:`, error);
         // Continue processing other events even if one fails
+        log.skipped = true;
+        await this.saveEvent(log, chainId);
+        const eventNonce = log.args.eventNonce ?? log.args.nonce ?? 0n;
+        await this.updateObservedNonce(
+          chainId,
+          eventNonce,
+          log.blockNumber,
+          latestBlock,
+        );
       }
     }
   }
