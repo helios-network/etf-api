@@ -97,6 +97,8 @@ export interface V3PoolInfo {
   liquidityUSD: number;
   token0: string;
   token1: string;
+  poolAddress: string;
+  calculatedTokenBPriceUSD: number | null;
 }
 
 export interface V3PathInfo {
