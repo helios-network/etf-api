@@ -1,3 +1,5 @@
+import * as os from 'os';
+
 export interface DatabaseConfig {
   mongodb: {
     uri: string;
@@ -28,6 +30,25 @@ export interface RateLimitConfig {
   namespace: string;
 }
 
+export interface RpcRateLimitConfig {
+  maxRequests: number;
+  windowMs: number;
+}
+
+export interface RpcRetryConfig {
+  maxRetries: number;
+  baseDelay: number;
+  maxDelay: number;
+}
+
+export interface RpcConfig {
+  rateLimits: {
+    1: RpcRateLimitConfig; // MAINNET
+    42161: RpcRateLimitConfig; // ARBITRUM
+  };
+  retry: RpcRetryConfig;
+}
+
 export interface AppConfig {
   nodeEnv: string;
   port: number;
@@ -37,6 +58,7 @@ export interface AppConfig {
   cache: CacheConfig;
   cors: CorsConfig;
   rateLimit: RateLimitConfig;
+  rpc: RpcConfig;
   privateKey?: string;
   rpcUrls?: {
     mainnet?: string;
@@ -45,7 +67,25 @@ export interface AppConfig {
   debugTvl: boolean;
 }
 
-import * as os from 'os';
+function parseRateLimitConfig(config: string): RpcRateLimitConfig {
+  const parts = config.split('/');
+  if (parts.length !== 2) {
+    throw new Error(
+      `Invalid rate limit config format: ${config}. Expected format: "maxRequests/windowSeconds"`,
+    );
+  }
+  const maxRequests = parseInt(parts[0], 10);
+  const windowSeconds = parseInt(parts[1], 10);
+  if (isNaN(maxRequests) || isNaN(windowSeconds) || maxRequests <= 0 || windowSeconds <= 0) {
+    throw new Error(
+      `Invalid rate limit config values: ${config}. Both values must be positive numbers`,
+    );
+  }
+  return {
+    maxRequests,
+    windowMs: windowSeconds * 1000,
+  };
+}
 
 export default (): AppConfig => {
   const defaultWorkerCount = Math.max(1, os.cpus().length - 1);
@@ -93,11 +133,22 @@ export default (): AppConfig => {
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
     namespace: process.env.RATE_LIMIT_NAMESPACE || 'ratelimit',
   },
-  privateKey: process.env.PRIVATE_KEY,
-  rpcUrls: {
-    mainnet: process.env.RPC_URL_MAINNET,
-    arbitrum: process.env.RPC_URL_ARBITRUM,
+  rpc: {
+    rateLimits: {
+      1: parseRateLimitConfig(
+        process.env.RPC_RATE_LIMIT_MAINNET || '300/60',
+      ),
+      42161: parseRateLimitConfig(
+        process.env.RPC_RATE_LIMIT_ARBITRUM || '300/60',
+      ),
+    },
+    retry: {
+      maxRetries: parseInt(process.env.RPC_RETRY_MAX_RETRIES || '5', 10),
+      baseDelay: parseInt(process.env.RPC_RETRY_BASE_DELAY || '1000', 10),
+      maxDelay: parseInt(process.env.RPC_RETRY_MAX_DELAY || '300000', 10),
+    },
   },
+  privateKey: process.env.PRIVATE_KEY,
   debugTvl:
     process.env.DEBUG_TVL === 'true' ||
     process.env.DEBUG_TVL === '1' ||

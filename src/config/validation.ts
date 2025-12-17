@@ -25,15 +25,18 @@ export const validationSchema = Joi.object({
   RATE_LIMIT_WINDOW_MS: Joi.number().min(1000).default(60000),
   RATE_LIMIT_MAX_REQUESTS: Joi.number().min(1).default(100),
   RATE_LIMIT_NAMESPACE: Joi.string().default('ratelimit'),
+  RPC_RATE_LIMIT_MAINNET: Joi.string()
+    .pattern(/^\d+\/\d+$/)
+    .default('300/60')
+    .description('Format: maxRequests/windowSeconds (e.g., 300/60)'),
+  RPC_RATE_LIMIT_ARBITRUM: Joi.string()
+    .pattern(/^\d+\/\d+$/)
+    .default('300/60')
+    .description('Format: maxRequests/windowSeconds (e.g., 300/60)'),
+  RPC_RETRY_MAX_RETRIES: Joi.number().min(0).default(5),
+  RPC_RETRY_BASE_DELAY: Joi.number().min(100).default(1000),
+  RPC_RETRY_MAX_DELAY: Joi.number().min(1000).default(300000),
   PRIVATE_KEY: Joi.string()
-    .optional()
-    .allow(''),
-  RPC_URL_MAINNET: Joi.string()
-    .uri()
-    .optional()
-    .allow(''),
-  RPC_URL_ARBITRUM: Joi.string()
-    .uri()
     .optional()
     .allow(''),
   DEBUG_TVL: Joi.string()

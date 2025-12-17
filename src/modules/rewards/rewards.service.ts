@@ -15,8 +15,8 @@ import { Web3Service } from '../../services/web3.service';
 import { ChainId } from '../../config/web3';
 import { TRANSACTION_POINTS } from '../../constants/transaction-points';
 import { verifyMessage, erc20Abi } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
 import { normalizeEthAddress } from '../../common/utils/eip55';
+import { RpcRateLimitService } from '../../services/rpc-rate-limit/rpc-rate-limit.service';
 
 @Injectable()
 export class RewardsService {
@@ -31,7 +31,7 @@ export class RewardsService {
     private leaderBoardRewardsModel: Model<LeaderBoardRewardsDocument>,
     private readonly cacheService: CacheService,
     private readonly web3Service: Web3Service,
-    private readonly configService: ConfigService,
+    private readonly rpcRateLimitService: RpcRateLimitService,
   ) {}
 
   async getRewardsBoost() {
@@ -184,13 +184,17 @@ export class RewardsService {
           Number(chainId) as ChainId,
         );
 
-        const { request } = await publicClient.simulateContract({
-          account: ownerAccount,
-          address: `0x0000000000000000000000000000000000000000` as `0x${string}`,//token.address as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'transfer',
-          args: [address as `0x${string}`, totalAmount],
-        });
+        const { request } = await this.rpcRateLimitService.executeWithRateLimit(
+          Number(chainId) as ChainId,
+          () =>
+            publicClient.simulateContract({
+              account: ownerAccount,
+              address: `0x0000000000000000000000000000000000000000` as `0x${string}`,
+              abi: erc20Abi,
+              functionName: 'transfer',
+              args: [address as `0x${string}`, totalAmount],
+            }),
+        );
 
         const tx = await walletClient.writeContract(request);
 

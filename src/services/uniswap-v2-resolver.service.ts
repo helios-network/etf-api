@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { type PublicClient, parseAbi, encodeAbiParameters } from 'viem';
 import { ASSETS_ADDRS, UNISWAP_V2_FACTORY_ADDRS, UNISWAP_V2_ROUTER_ADDRS } from '../constants';
 import { V2PoolInfo } from '../types/etf-verify.types';
+import { RpcRateLimitService } from './rpc-rate-limit/rpc-rate-limit.service';
+import { ChainId } from '../config/web3';
 
 /**
  * Uniswap V2 Factory ABI
@@ -29,6 +31,8 @@ const V2_ROUTER_ABI = parseAbi([
 @Injectable()
 export class UniswapV2ResolverService {
   private readonly logger = new Logger(UniswapV2ResolverService.name);
+
+  constructor(private readonly rpcRateLimitService: RpcRateLimitService) {}
   /**
    * Check if a V2 pool exists between two tokens
    */
@@ -39,12 +43,16 @@ export class UniswapV2ResolverService {
     tokenB: `0x${string}`,
   ): Promise<{ exists: boolean; pairAddress: `0x${string}` | null }> {
     try {
-      const pairAddress = await client.readContract({
-        address: UNISWAP_V2_FACTORY_ADDRS[chainId] as `0x${string}`,
-        abi: V2_FACTORY_ABI,
-        functionName: 'getPair',
-        args: [tokenA, tokenB],
-      });
+      const pairAddress = await this.rpcRateLimitService.executeWithRateLimit(
+        chainId as ChainId,
+        () =>
+          client.readContract({
+            address: UNISWAP_V2_FACTORY_ADDRS[chainId] as `0x${string}`,
+            abi: V2_FACTORY_ABI,
+            functionName: 'getPair',
+            args: [tokenA, tokenB],
+          }),
+      );
 
       if (pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000') {
         return { exists: true, pairAddress: pairAddress as `0x${string}` };
@@ -63,13 +71,18 @@ export class UniswapV2ResolverService {
   async getV2Reserves(
     client: PublicClient,
     pairAddress: `0x${string}`,
+    chainId: number,
   ): Promise<{ reserve0: bigint; reserve1: bigint } | null> {
     try {
-      const [reserve0, reserve1] = await client.readContract({
-        address: pairAddress,
-        abi: V2_PAIR_ABI,
-        functionName: 'getReserves',
-      });
+      const [reserve0, reserve1] = await this.rpcRateLimitService.executeWithRateLimit(
+        chainId as ChainId,
+        () =>
+          client.readContract({
+            address: pairAddress,
+            abi: V2_PAIR_ABI,
+            functionName: 'getReserves',
+          }),
+      );
 
       return {
         reserve0: reserve0 as bigint,
@@ -101,7 +114,7 @@ export class UniswapV2ResolverService {
         return 0;
       }
 
-      const reserves = await this.getV2Reserves(client, pairAddress);
+      const reserves = await this.getV2Reserves(client, pairAddress, chainId);
 
       if (!reserves) {
         return 0;
@@ -109,16 +122,24 @@ export class UniswapV2ResolverService {
 
       // Get token0 and token1 to determine order
       const [token0, token1] = await Promise.all([
-        client.readContract({
-          address: pairAddress,
-          abi: V2_PAIR_ABI,
-          functionName: 'token0',
-        }),
-        client.readContract({
-          address: pairAddress,
-          abi: V2_PAIR_ABI,
-          functionName: 'token1',
-        }),
+        this.rpcRateLimitService.executeWithRateLimit(
+          chainId as ChainId,
+          () =>
+            client.readContract({
+              address: pairAddress,
+              abi: V2_PAIR_ABI,
+              functionName: 'token0',
+            }),
+        ),
+        this.rpcRateLimitService.executeWithRateLimit(
+          chainId as ChainId,
+          () =>
+            client.readContract({
+              address: pairAddress,
+              abi: V2_PAIR_ABI,
+              functionName: 'token1',
+            }),
+        ),
       ]);
 
       const isTokenAFirst = (token0 as string).toLowerCase() === tokenA.toLowerCase();
@@ -137,12 +158,16 @@ export class UniswapV2ResolverService {
       // Quote swapping 1 tokenA to tokenB, then estimate USD
       const amountIn = BigInt(10 ** tokenADecimals); // 1 token
       try {
-        const amountsOut = await client.readContract({
-          address: UNISWAP_V2_ROUTER_ADDRS[chainId] as `0x${string}`,
-          abi: V2_ROUTER_ABI,
-          functionName: 'getAmountsOut',
-          args: [amountIn, [tokenA, tokenB]],
-        });
+        const amountsOut = await this.rpcRateLimitService.executeWithRateLimit(
+          chainId as ChainId,
+          () =>
+            client.readContract({
+              address: UNISWAP_V2_ROUTER_ADDRS[chainId] as `0x${string}`,
+              abi: V2_ROUTER_ABI,
+              functionName: 'getAmountsOut',
+              args: [amountIn, [tokenA, tokenB]],
+            }),
+        );
 
         const amountOut = amountsOut[1] as bigint;
         const priceRatio =
@@ -197,12 +222,16 @@ export class UniswapV2ResolverService {
 
       // Quote 1 WETH in USDC
       const amountIn = BigInt(10 ** WETH_DECIMALS); // 1 WETH
-      const amountsOut = await client.readContract({
-        address: UNISWAP_V2_ROUTER_ADDRS[chainId] as `0x${string}`,
-        abi: V2_ROUTER_ABI,
-        functionName: 'getAmountsOut',
-        args: [amountIn, [WETH, USDC]],
-      });
+      const amountsOut = await this.rpcRateLimitService.executeWithRateLimit(
+        chainId as ChainId,
+        () =>
+          client.readContract({
+            address: UNISWAP_V2_ROUTER_ADDRS[chainId] as `0x${string}`,
+            abi: V2_ROUTER_ABI,
+            functionName: 'getAmountsOut',
+            args: [amountIn, [WETH, USDC]],
+          }),
+      );
 
       const amountOut = amountsOut[1] as bigint;
       // Convert to USD price: amountOut is in USDC (6 decimals), so divide by 10^6

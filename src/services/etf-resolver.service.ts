@@ -4,6 +4,8 @@ import { ASSETS_ADDRS, MIN_LIQUIDITY_USD } from '../constants';
 import { ChainlinkResolverService } from './chainlink-resolver.service';
 import { UniswapV2ResolverService } from './uniswap-v2-resolver.service';
 import { UniswapV3ResolverService } from './uniswap-v3-resolver.service';
+import { RpcRateLimitService } from './rpc-rate-limit/rpc-rate-limit.service';
+import { ChainId } from '../config/web3';
 import {
   TokenMetadata,
   ResolutionResult,
@@ -20,6 +22,7 @@ export class EtfResolverService {
     private readonly chainlinkResolver: ChainlinkResolverService,
     private readonly uniswapV2Resolver: UniswapV2ResolverService,
     private readonly uniswapV3Resolver: UniswapV3ResolverService,
+    private readonly rpcRateLimitService: RpcRateLimitService,
   ) {}
 
   /**
@@ -28,21 +31,28 @@ export class EtfResolverService {
   async getTokenMetadata(
     client: PublicClient,
     tokenAddress: `0x${string}`,
+    chainId: ChainId,
   ): Promise<TokenMetadata> {
     try {
-
-      console.log('client.chain', client.chain);
       const [symbol, decimals] = await Promise.all([
-        client.readContract({
-          address: tokenAddress,
-          abi: erc20Abi,
-          functionName: 'symbol',
-        }),
-        client.readContract({
-          address: tokenAddress,
-          abi: erc20Abi,
-          functionName: 'decimals',
-        }),
+        this.rpcRateLimitService.executeWithRateLimit(
+          chainId,
+          () =>
+            client.readContract({
+              address: tokenAddress,
+              abi: erc20Abi,
+              functionName: 'symbol',
+            }),
+        ),
+        this.rpcRateLimitService.executeWithRateLimit(
+          chainId,
+          () =>
+            client.readContract({
+              address: tokenAddress,
+              abi: erc20Abi,
+              functionName: 'decimals',
+            }),
+        ),
       ]);
 
       return {
@@ -62,6 +72,7 @@ export class EtfResolverService {
     client: PublicClient,
     feedAddress: `0x${string}`,
     decimals: number,
+    chainId: ChainId,
   ): Promise<number | null> {
     try {
       const priceFeedAbi = [
@@ -80,11 +91,15 @@ export class EtfResolverService {
         },
       ] as const;
 
-      const result = await client.readContract({
-        address: feedAddress,
-        abi: priceFeedAbi,
-        functionName: 'latestRoundData',
-      });
+      const result = await this.rpcRateLimitService.executeWithRateLimit(
+        chainId,
+        () =>
+          client.readContract({
+            address: feedAddress,
+            abi: priceFeedAbi,
+            functionName: 'latestRoundData',
+          }),
+      );
 
       const answer = result[1] as bigint;
       return Number(answer) / 10 ** decimals;
@@ -126,6 +141,7 @@ export class EtfResolverService {
           client,
           usdcFeed.proxyAddress as `0x${string}`,
           usdcFeed.decimals,
+          chainId as ChainId,
         )
       : null;
 
@@ -151,6 +167,7 @@ export class EtfResolverService {
         client,
         targetFeed!.proxyAddress as `0x${string}`,
         targetFeed!.decimals,
+        chainId as ChainId,
       );
     }
 
@@ -240,6 +257,7 @@ export class EtfResolverService {
           client,
           usdcFeed.proxyAddress as `0x${string}`,
           usdcFeed.decimals,
+          chainId as ChainId,
         )
       : null;
 
@@ -263,6 +281,7 @@ export class EtfResolverService {
           client,
           targetFeed.proxyAddress as `0x${string}`,
           targetFeed.decimals,
+          chainId as ChainId,
         )
       : null;
 

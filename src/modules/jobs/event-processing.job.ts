@@ -14,6 +14,7 @@ import { Web3Service } from '../../services/web3.service';
 import { VaultUtilsService } from '../../services/vault-utils.service';
 import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
 import { EtfVolumeService } from '../../services/etf-volume.service';
+import { RpcRateLimitService } from '../../services/rpc-rate-limit/rpc-rate-limit.service';
 import { Event, EventDocument } from '../../models/event.schema';
 import {
   ObserveEvents,
@@ -24,6 +25,10 @@ import {
   WalletHolding,
   WalletHoldingDocument,
 } from '../../models/wallet-holding.schema';
+import {
+  EtfVolume,
+  EtfVolumeDocument,
+} from '../../models/etf-volume.schema';
 import { normalizeEthAddress } from '../../common/utils/eip55';
 
 // Constants following the Go code pattern
@@ -111,10 +116,13 @@ export class EventProcessingJob {
     private etfModel: Model<ETFDocument>,
     @InjectModel(WalletHolding.name)
     private walletHoldingModel: Model<WalletHoldingDocument>,
+    @InjectModel(EtfVolume.name)
+    private etfVolumeModel: Model<EtfVolumeDocument>,
     private readonly web3Service: Web3Service,
     private readonly vaultUtils: VaultUtilsService,
     private readonly walletHoldingUtils: WalletHoldingUtilsService,
     private readonly etfVolumeService: EtfVolumeService,
+    private readonly rpcRateLimitService: RpcRateLimitService,
   ) {
     this.logger.log('EventProcessingJob constructor called');
   }
@@ -481,7 +489,11 @@ export class EventProcessingJob {
     // Try to get the creator wallet from transaction
     if (log.transactionHash) {
       try {
-        const tx = await client.getTransaction({ hash: log.transactionHash });
+        const transactionHash = log.transactionHash;
+        const tx = await this.rpcRateLimitService.executeWithRateLimit(
+          chainId,
+          () => client.getTransaction({ hash: transactionHash }),
+        );
         if (tx.from) {
           const walletHolding = this.getOrCreateWalletHolding(
             tx.from,
@@ -502,6 +514,7 @@ export class EventProcessingJob {
         client,
         vault,
         shareToken,
+        chainId,
       );
 
       // Check if depositToken is authorized
@@ -669,6 +682,7 @@ export class EventProcessingJob {
    * Following Go code pattern exactly
    */
   private async getFactoryEvents(
+    chainId: ChainId,
     client: PublicClient,
     contractAddress: `0x${string}`,
     fromBlock: bigint,
@@ -679,16 +693,19 @@ export class EventProcessingJob {
     const newEvents: EventLog[] = [];
     const noncesFound: bigint[] = [];
 
-    console.log('Deposit events');
     // 1. Deposit events (most frequent)
-    const depositEvents = await client.getLogs({
-      address: contractAddress,
-      fromBlock,
-      toBlock,
-      events: parseAbi([
-        'event Deposit(address indexed vault, address user, uint256 depositAmount, uint256 sharesOut, uint256[] amountsOut, uint256[] valuesPerAsset, uint256 eventNonce, uint256 eventHeight)',
-      ]),
-    });
+    const depositEvents = await this.rpcRateLimitService.executeWithRateLimit(
+      chainId,
+      () =>
+        client.getLogs({
+          address: contractAddress,
+          fromBlock,
+          toBlock,
+          events: parseAbi([
+            'event Deposit(address indexed vault, address user, uint256 depositAmount, uint256 sharesOut, uint256[] amountsOut, uint256[] valuesPerAsset, uint256 eventNonce, uint256 eventHeight)',
+          ]),
+        }),
+    );
 
     for (const log of depositEvents) {
       const ev = log as EventLog;
@@ -704,17 +721,19 @@ export class EventProcessingJob {
       return newEvents;
     }
 
-    console.log('Redeem events');
-
     // 2. Redeem events
-    const redeemEvents = await client.getLogs({
-      address: contractAddress,
-      fromBlock,
-      toBlock,
-      events: parseAbi([
-        'event Redeem(address indexed vault, address user, uint256 sharesIn, uint256 depositOut, uint256[] soldAmounts, uint256 eventNonce, uint256 eventHeight)',
-      ]),
-    });
+    const redeemEvents = await this.rpcRateLimitService.executeWithRateLimit(
+      chainId,
+      () =>
+        client.getLogs({
+          address: contractAddress,
+          fromBlock,
+          toBlock,
+          events: parseAbi([
+            'event Redeem(address indexed vault, address user, uint256 sharesIn, uint256 depositOut, uint256[] soldAmounts, uint256 eventNonce, uint256 eventHeight)',
+          ]),
+        }),
+    );
 
     for (const log of redeemEvents) {
       const ev = log as EventLog;
@@ -729,17 +748,19 @@ export class EventProcessingJob {
       this.logger.debug('All nonces found early - optimized RPC calls');
       return newEvents;
     }
-
-    console.log('ETFCreated events');
     // 3. ETFCreated events
-    const etfCreatedEvents = await client.getLogs({
-      address: contractAddress,
-      fromBlock,
-      toBlock,
-      events: parseAbi([
-        'event ETFCreated(address indexed vault, uint256 eventNonce, uint256 eventHeight, uint256 etfNonce, address shareToken, string name, string symbol)',
-      ]),
-    });
+    const etfCreatedEvents = await this.rpcRateLimitService.executeWithRateLimit(
+      chainId,
+      () =>
+        client.getLogs({
+          address: contractAddress,
+          fromBlock,
+          toBlock,
+          events: parseAbi([
+            'event ETFCreated(address indexed vault, uint256 eventNonce, uint256 eventHeight, uint256 etfNonce, address shareToken, string name, string symbol)',
+          ]),
+        }),
+    );
 
     for (const log of etfCreatedEvents) {
       const ev = log as EventLog;
@@ -755,17 +776,19 @@ export class EventProcessingJob {
       return newEvents;
     }
 
-    console.log('Rebalance events');
-
     // 4. Rebalance events
-    const rebalanceEvents = await client.getLogs({
-      address: contractAddress,
-      fromBlock,
-      toBlock,
-      events: parseAbi([
-        'event Rebalance(address indexed vault, address user, uint256 fromIndex, uint256 toIndex, uint256 moveValue, uint256 eventNonce, uint256 eventHeight, uint256 bought)',
-      ]),
-    });
+    const rebalanceEvents = await this.rpcRateLimitService.executeWithRateLimit(
+      chainId,
+      () =>
+        client.getLogs({
+          address: contractAddress,
+          fromBlock,
+          toBlock,
+          events: parseAbi([
+            'event Rebalance(address indexed vault, address user, uint256 fromIndex, uint256 toIndex, uint256 moveValue, uint256 eventNonce, uint256 eventHeight, uint256 bought)',
+          ]),
+        }),
+    );
 
     for (const log of rebalanceEvents) {
       const ev = log as EventLog;
@@ -782,14 +805,18 @@ export class EventProcessingJob {
     }
 
     // 5. ParamsUpdated events
-    const paramsUpdatedEvents = await client.getLogs({
-      address: contractAddress,
-      fromBlock,
-      toBlock,
-      events: parseAbi([
-        'event ParamsUpdated(address indexed vault, uint256 imbalanceThresholdBps, uint256 maxPriceStaleness, uint256 hlsBalance, uint256 eventNonce, uint256 eventHeight)',
-      ]),
-    });
+    const paramsUpdatedEvents = await this.rpcRateLimitService.executeWithRateLimit(
+      chainId,
+      () =>
+        client.getLogs({
+          address: contractAddress,
+          fromBlock,
+          toBlock,
+          events: parseAbi([
+            'event ParamsUpdated(address indexed vault, uint256 imbalanceThresholdBps, uint256 maxPriceStaleness, uint256 hlsBalance, uint256 eventNonce, uint256 eventHeight)',
+          ]),
+        }),
+    );
 
     for (const log of paramsUpdatedEvents) {
       const ev = log as EventLog;
@@ -1033,7 +1060,11 @@ export class EventProcessingJob {
             // Save wallet holdings that were modified (if any)
             if (eventProcessed && log.transactionHash) {
               try {
-                const tx = await client.getTransaction({ hash: log.transactionHash });
+                const transactionHash = log.transactionHash; // Capture for closure
+                const tx = await this.rpcRateLimitService.executeWithRateLimit(
+                  chainId,
+                  () => client.getTransaction({ hash: transactionHash }),
+                );
                 if (tx.from) {
                   const walletHolding = holdingsMap.get(tx.from);
                   if (walletHolding) {
@@ -1145,6 +1176,7 @@ export class EventProcessingJob {
         const portfolio = await this.vaultUtils.fetchVaultPortfolio(
           client,
           etf.vault as `0x${string}`,
+          chainId,
           etf.shareDecimals,
         );
 
@@ -1212,16 +1244,20 @@ export class EventProcessingJob {
       ? BigInt(observeProgress.lastNonce ?? '0')
       : 0n;
 
-    // Get latest event nonce from contract
+    // Get latest event nonce from contract with rate limiting
     let latestEventNonce: bigint;
     try {
-      latestEventNonce = (await client.readContract({
-        address: ETF_CONTRACT_ADDRS[chainId] as `0x${string}`,
-        abi: parseAbi([
-          'function state_lastEventNonce() view returns (uint256)',
-        ]),
-        functionName: 'state_lastEventNonce',
-      })) as bigint;
+      latestEventNonce = (await this.rpcRateLimitService.executeWithRateLimit(
+        chainId,
+        () =>
+          client.readContract({
+            address: ETF_CONTRACT_ADDRS[chainId] as `0x${string}`,
+            abi: parseAbi([
+              'function state_lastEventNonce() view returns (uint256)',
+            ]),
+            functionName: 'state_lastEventNonce',
+          }),
+      )) as bigint;
     } catch (error: any) {
       if (error?.message?.includes('no contract code')) {
         this.logger.warn(
@@ -1238,7 +1274,6 @@ export class EventProcessingJob {
       this.missedEventsBlockHeight.get(chainId) === 0n
     ) {
       if (lastObservedEventNonce === latestEventNonce) {
-        this.logger.debug(`No new events on chain ${chainId} (nonces match)`);
         return { lastObservedEthHeight: targetHeight };
       } else {
         // Special case to reduce the number of calls to the ethereum rpc
@@ -1274,6 +1309,7 @@ export class EventProcessingJob {
     let events: EventLog[];
     try {
       events = await this.getFactoryEvents(
+        chainId,
         client,
         contractAddress,
         lastObservedEthHeight,
@@ -1297,7 +1333,6 @@ export class EventProcessingJob {
     });
 
     if (newEvents.length === 0) {
-      this.logger.debug(`No new events on chain ${chainId} (blocks ${lastObservedEthHeight}-${targetHeight})`);
       return { lastObservedEthHeight: targetHeight };
     }
 
@@ -1433,10 +1468,13 @@ export class EventProcessingJob {
         : DEFAULT_START_BLOCKS[chainId];
     }
 
-    // Get latest block number
+    // Get latest block number with rate limiting
     let latestHeight: bigint;
     try {
-      latestHeight = await client.getBlockNumber();
+      latestHeight = await this.rpcRateLimitService.executeWithRateLimit(
+        chainId,
+        () => client.getBlockNumber(),
+      );
     } catch (error) {
       this.logger.error(`Failed to get latest height on chain ${chainId}:`, error);
       return;
@@ -1460,39 +1498,123 @@ export class EventProcessingJob {
       return;
     }
 
+    // Detect first launch (no observeProgress exists)
+    const isFirstLaunch = !observeProgress;
+    
+    if (isFirstLaunch) {
+      this.logger.log(
+        `First launch detected for chain ${chainId}. Starting full synchronization from block ${lastObservedEthHeight} to ${targetHeight}`,
+      );
+    }
+
     // Sync in chunks following Go code pattern
     const defaultBlocksToSearch = DEFAULT_BLOCKS_TO_SEARCH;
     let targetHeightForSync = targetHeight;
 
-    for (let i = 0; i < 100 && latestHeight > targetHeightForSync; i++) {
-      if (targetHeightForSync > lastObservedEthHeight + defaultBlocksToSearch) {
-        targetHeightForSync = lastObservedEthHeight + defaultBlocksToSearch;
-      }
+    // On first launch, sync completely without iteration limit
+    // For normal syncs, limit to 100 iterations to avoid infinite loops
+    if (isFirstLaunch) {
+      // Full sync: continue until we reach targetHeight
+      while (lastObservedEthHeight < targetHeight) {
+        if (targetHeightForSync > lastObservedEthHeight + defaultBlocksToSearch) {
+          targetHeightForSync = lastObservedEthHeight + defaultBlocksToSearch;
+        }
 
-      const result = await this.syncToTargetHeight(
-        chainId,
-        client,
-        lastObservedEthHeight,
-        targetHeightForSync,
-        latestHeight,
-        ethBlockConfirmationDelay,
-      );
+        // Don't exceed targetHeight
+        if (targetHeightForSync > targetHeight) {
+          targetHeightForSync = targetHeight;
+        }
 
-      if (result.error) {
-        if (result.error.message === 'missed an event') {
-          // Restart from rewinded height
-          lastObservedEthHeight = result.lastObservedEthHeight;
-          // Continue the loop to retry
-          continue;
-        } else {
-          // Other errors, return
-          this.logger.error('Error in syncToTargetHeight:', result.error);
-          return;
+        const result = await this.syncToTargetHeight(
+          chainId,
+          client,
+          lastObservedEthHeight,
+          targetHeightForSync,
+          latestHeight,
+          ethBlockConfirmationDelay,
+        );
+
+        if (result.error) {
+          if (result.error.message === 'missed an event') {
+            // Restart from rewinded height
+            lastObservedEthHeight = result.lastObservedEthHeight;
+            // Continue the loop to retry
+            continue;
+          } else {
+            // Other errors, return
+            this.logger.error('Error in syncToTargetHeight:', result.error);
+            return;
+          }
+        }
+
+        lastObservedEthHeight = result.lastObservedEthHeight;
+        
+        // Check if we've reached the target
+        if (lastObservedEthHeight >= targetHeight) {
+          break;
+        }
+        
+        targetHeightForSync = targetHeightForSync + defaultBlocksToSearch;
+        
+        // Log progress for first launch
+        const totalBlocksToSync = targetHeight - DEFAULT_START_BLOCKS[chainId];
+        if (totalBlocksToSync > 0n) {
+          const progressPercent = Number(
+            ((lastObservedEthHeight - DEFAULT_START_BLOCKS[chainId]) * 100n) /
+            totalBlocksToSync,
+          ).toFixed(2);
+          this.logger.log(
+            `First launch sync progress for chain ${chainId}: ${progressPercent}% (block ${lastObservedEthHeight}/${targetHeight})`,
+          );
         }
       }
+      
+      this.logger.log(
+        `First launch full synchronization completed for chain ${chainId}. Synced from block ${DEFAULT_START_BLOCKS[chainId]} to ${lastObservedEthHeight}`,
+      );
+    } else {
+      // Normal sync: continue until we reach targetHeight (rate limiting handles RPC calls)
+      while (lastObservedEthHeight < targetHeight) {
+        if (targetHeightForSync > lastObservedEthHeight + defaultBlocksToSearch) {
+          targetHeightForSync = lastObservedEthHeight + defaultBlocksToSearch;
+        }
 
-      lastObservedEthHeight = result.lastObservedEthHeight;
-      targetHeightForSync = targetHeightForSync + defaultBlocksToSearch;
+        // Don't exceed targetHeight
+        if (targetHeightForSync > targetHeight) {
+          targetHeightForSync = targetHeight;
+        }
+
+        const result = await this.syncToTargetHeight(
+          chainId,
+          client,
+          lastObservedEthHeight,
+          targetHeightForSync,
+          latestHeight,
+          ethBlockConfirmationDelay,
+        );
+
+        if (result.error) {
+          if (result.error.message === 'missed an event') {
+            // Restart from rewinded height
+            lastObservedEthHeight = result.lastObservedEthHeight;
+            // Continue the loop to retry
+            continue;
+          } else {
+            // Other errors, return
+            this.logger.error('Error in syncToTargetHeight:', result.error);
+            return;
+          }
+        }
+
+        lastObservedEthHeight = result.lastObservedEthHeight;
+        
+        // Check if we've reached the target
+        if (lastObservedEthHeight >= targetHeight) {
+          break;
+        }
+        
+        targetHeightForSync = targetHeightForSync + defaultBlocksToSearch;
+      }
     }
 
     // Save progress to database
@@ -1519,14 +1641,68 @@ export class EventProcessingJob {
       },
       { upsert: true },
     );
+
+    // On first launch, initialize volumes for all ETFs on this chain
+    if (isFirstLaunch) {
+      await this.initializeVolumesForChain(chainId);
+    }
+  }
+
+  /**
+   * Initialize volumes for all ETFs on a chain that don't have volumes yet
+   */
+  private async initializeVolumesForChain(chainId: ChainId): Promise<void> {
+    this.logger.log(
+      `Initializing volumes for all ETFs on chain ${chainId}...`,
+    );
+
+    try {
+      // Get all ETFs for this chain
+      const etfs = await this.etfModel.find({ chain: Number(chainId) }).lean();
+
+      let initializedCount = 0;
+      for (const etf of etfs) {
+        try {
+          const normalizedVault = normalizeEthAddress(etf.vault);
+          
+          // Check if volume document already exists
+          const volumeDoc = await this.etfVolumeModel.findOne({
+            vault: normalizedVault,
+            chain: Number(chainId),
+          });
+
+          if (!volumeDoc) {
+            // Initialize empty volume document
+            await this.etfVolumeModel.create({
+              vault: normalizedVault,
+              chain: Number(chainId),
+              volumes: [],
+            });
+            initializedCount++;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Failed to initialize volume for ETF ${etf.vault} on chain ${chainId}:`,
+            error,
+          );
+        }
+      }
+
+      this.logger.log(
+        `Volume initialization completed for chain ${chainId}. Initialized ${initializedCount} volumes.`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error initializing volumes for chain ${chainId}:`,
+        error,
+      );
+    }
   }
 
   @Cron('*/12 * * * * *') // Every 12 seconds
   async handleEventProcessing(): Promise<void> {
-    this.logger.log('handleEventProcessing - cron triggered');
     // Check if job is already running
     if (this.isRunning) {
-      this.logger.debug('Event job is already running, skipping this execution');
       return;
     }
 
@@ -1545,17 +1721,24 @@ export class EventProcessingJob {
           if (!observeProgress) {
             continue;
           }
-          const lastEventNonce = (await client.readContract({
-            address: ETF_CONTRACT_ADDRS[chainId] as `0x${string}`,
-            abi: parseAbi([
-              'function state_lastEventNonce() view returns (uint256)',
-            ]),
-            functionName: 'state_lastEventNonce',
-          })) as bigint;
+          const lastEventNonce = (await this.rpcRateLimitService.executeWithRateLimit(
+            chainId,
+            () =>
+              client.readContract({
+                address: ETF_CONTRACT_ADDRS[chainId] as `0x${string}`,
+                abi: parseAbi([
+                  'function state_lastEventNonce() view returns (uint256)',
+                ]),
+                functionName: 'state_lastEventNonce',
+              }),
+          )) as bigint;
 
           const lastObservedNonce = BigInt(observeProgress.lastNonce ?? '0');
           if (lastEventNonce <= lastObservedNonce) {
-            const latestObservedHeight = await client.getBlockNumber();
+            const latestObservedHeight = await this.rpcRateLimitService.executeWithRateLimit(
+              chainId,
+              () => client.getBlockNumber(),
+            );
             await this.observeEventsModel.findOneAndUpdate(
               { chain: Number(chainId) },
               {

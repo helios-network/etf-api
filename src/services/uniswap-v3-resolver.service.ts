@@ -2,12 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { type PublicClient, parseAbi, encodePacked } from 'viem';
 import {
   UNISWAP_V3_FACTORY_ADDRS,
-  UNISWAP_V3_QUOTER_ADDRS,
   UNISWAP_V3_FEES,
   MIN_LIQUIDITY_USD,
   ASSETS_ADDRS,
 } from '../constants';
 import { V3PoolInfo, V3PathInfo } from '../types/etf-verify.types';
+import { RpcRateLimitService } from './rpc-rate-limit/rpc-rate-limit.service';
+import { ChainId } from '../config/web3';
 import { ethers } from 'ethers';
 
 /**
@@ -38,6 +39,8 @@ const V3_QUOTER_ABI = parseAbi([
 @Injectable()
 export class UniswapV3ResolverService {
   private readonly logger = new Logger(UniswapV3ResolverService.name);
+
+  constructor(private readonly rpcRateLimitService: RpcRateLimitService) {}
   /**
    * Check if a V3 pool exists for a given fee tier
    */
@@ -49,12 +52,16 @@ export class UniswapV3ResolverService {
     fee: number,
   ): Promise<{ exists: boolean; poolAddress: `0x${string}` | null }> {
     try {
-      const poolAddress = await client.readContract({
-        address: UNISWAP_V3_FACTORY_ADDRS[chainId] as `0x${string}`,
-        abi: V3_FACTORY_ABI,
-        functionName: 'getPool',
-        args: [tokenA, tokenB, fee],
-      });
+      const poolAddress = await this.rpcRateLimitService.executeWithRateLimit(
+        chainId as ChainId,
+        () =>
+          client.readContract({
+            address: UNISWAP_V3_FACTORY_ADDRS[chainId] as `0x${string}`,
+            abi: V3_FACTORY_ABI,
+            functionName: 'getPool',
+            args: [tokenA, tokenB, fee],
+          }),
+      );
 
       if (poolAddress && poolAddress !== '0x0000000000000000000000000000000000000000') {
         return { exists: true, poolAddress: poolAddress as `0x${string}` };
@@ -73,13 +80,18 @@ export class UniswapV3ResolverService {
   async getV3Liquidity(
     client: PublicClient,
     poolAddress: `0x${string}`,
+    chainId: number,
   ): Promise<bigint | null> {
     try {
-      const liquidity = await client.readContract({
-        address: poolAddress,
-        abi: V3_POOL_ABI,
-        functionName: 'liquidity',
-      });
+      const liquidity = await this.rpcRateLimitService.executeWithRateLimit(
+        chainId as ChainId,
+        () =>
+          client.readContract({
+            address: poolAddress,
+            abi: V3_POOL_ABI,
+            functionName: 'liquidity',
+          }),
+      );
 
       return liquidity as bigint;
     } catch (error) {
@@ -91,7 +103,6 @@ export class UniswapV3ResolverService {
   /**
    * Calculate liquidity in USD for a V3 pool
    * Uses quoter to estimate USD value
-   * Returns [liquidityUSD, poolAddress, calculatedTokenBPriceUSD]
    */
   async calculateV3LiquidityUSD(
     client: PublicClient,
@@ -254,7 +265,6 @@ export class UniswapV3ResolverService {
       return [0, '', null];
     }
   }
-  
 
   /**
    * Find best V3 pool for a token pair
@@ -342,8 +352,6 @@ export class UniswapV3ResolverService {
       targetTokenPriceUSD,
     );
 
-    console.log('directPool', directPool, depositTokenPriceUSD, targetTokenPriceUSD);
-
     if (directPool.exists && directPool.liquidityUSD >= MIN_LIQUIDITY_USD) {
       return {
         exists: true,
@@ -368,8 +376,6 @@ export class UniswapV3ResolverService {
       null, // WETH price (we'll estimate)
     );
 
-    console.log('depositToWethPool', depositToWethPool, depositTokenPriceUSD, depositToWethPool.calculatedTokenBPriceUSD);
-
     // Find best pool for WETH -> targetToken
     const wethToTargetPool = await this.findBestV3Pool(
       client,
@@ -381,10 +387,6 @@ export class UniswapV3ResolverService {
       depositToWethPool.calculatedTokenBPriceUSD, // WETH price
       targetTokenPriceUSD,
     );
-
-    this.logger.debug(`V3 liquidity for WETH -> targetToken: ${wethToTargetPool.liquidityUSD}`);
-
-
 
     // Take minimum liquidity of the path
     const twoHopLiquidityToCheck = Math.min(

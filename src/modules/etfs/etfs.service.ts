@@ -29,7 +29,7 @@ export class EtfsService {
     private readonly etfResolver: EtfResolverService,
   ) {}
 
-  async getAll(page: number, size: number) {
+  async getAll(page: number, size: number, search?: string) {
     // Validate pagination parameters
     if (page < 1) {
       throw new Error('Page must be greater than 0');
@@ -39,8 +39,19 @@ export class EtfsService {
       throw new Error('Size must be between 1 and 100');
     }
 
+    const normalizedSearch = search && search.trim() ? search.trim() : '';
+    const searchFilter = normalizedSearch
+      ? {
+          $or: [
+            { name: { $regex: normalizedSearch, $options: 'i' } },
+            { symbol: { $regex: normalizedSearch, $options: 'i' } },
+            { 'assets.symbol': { $regex: normalizedSearch, $options: 'i' } },
+          ],
+        }
+      : {};
+
     // Build cache key with all parameters that influence the result
-    const cacheKey = `list:page=${page}:size=${size}`;
+    const cacheKey = `list:page=${page}:size=${size}:search=${normalizedSearch}`;
 
     // Use cache-aside pattern with 60 seconds TTL
     return await this.cacheService.wrap(
@@ -50,11 +61,11 @@ export class EtfsService {
         const skip = (page - 1) * size;
 
         // Get total count for pagination metadata
-        const total = await this.etfModel.countDocuments();
+        const total = await this.etfModel.countDocuments(searchFilter);
 
         // Fetch ETFs with pagination
         const etfs = await this.etfModel
-          .find()
+          .find(searchFilter)
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(size)
@@ -130,7 +141,6 @@ export class EtfsService {
 
     // Get blockchain client
     const chainId = body.chainId as ChainId;
-    console.log('chainId', chainId);
     const client = this.web3Service.getPublicClient(chainId);
     if (!client) {
       const errorResponse: VerifyErrorResponse = {
@@ -149,7 +159,7 @@ export class EtfsService {
     // Get deposit token metadata
     let depositTokenMetadata: TokenMetadata;
     try {
-      depositTokenMetadata = await this.etfResolver.getTokenMetadata(client, depositToken);
+      depositTokenMetadata = await this.etfResolver.getTokenMetadata(client, depositToken, chainId);
     } catch (error) {
       const errorResponse: VerifyErrorResponse = {
         status: 'ERROR',
@@ -179,6 +189,7 @@ export class EtfsService {
         const targetTokenMetadata = await this.etfResolver.getTokenMetadata(
           client,
           targetToken,
+          chainId,
         );
         tokenMetadataMap.set(targetToken, targetTokenMetadata);
 
@@ -209,7 +220,7 @@ export class EtfsService {
       } catch (error) {
         let targetSymbol = component.token;
         try {
-          const metadata = await this.etfResolver.getTokenMetadata(client, targetToken);
+          const metadata = await this.etfResolver.getTokenMetadata(client, targetToken, chainId);
           targetSymbol = metadata.symbol;
         } catch {
           // Keep original token address if metadata fetch fails
@@ -324,7 +335,7 @@ export class EtfsService {
     return successResponse;
   }
 
-  async getDepositTokens(chainId: number) {
+  async getDepositTokens(chainId: number, search?: string) {
     try {
       // Get all distinct deposit tokens
       const depositTokens = await this.etfModel.find({ chain: chainId }).distinct('depositToken');
@@ -354,6 +365,7 @@ export class EtfsService {
             const metadata = await this.etfResolver.getTokenMetadata(
               client,
               token as `0x${string}`,
+              chainId as ChainId,
             );
             return metadata;
           } catch (error) {
@@ -371,9 +383,23 @@ export class EtfsService {
         }),
       );
 
+      // Filter out tokens with empty symbols
+      let filteredMetadata = depositTokenMetadata.filter(
+        (metadata) => metadata.symbol !== '',
+      );
+
+      // Apply search filter if provided and not empty
+      if (search && search.trim()) {
+        const searchLower = search.trim().toLowerCase();
+        filteredMetadata = filteredMetadata.filter(
+          (metadata) =>
+            metadata.symbol?.toLowerCase().includes(searchLower),
+        );
+      }
+
       return {
         success: true,
-        data: depositTokenMetadata.filter((metadata) => metadata.symbol !== ''),
+        data: filteredMetadata,
       };
     } catch (error) {
       this.logger.error('Error fetching deposit tokens:', error);

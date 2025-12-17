@@ -6,7 +6,6 @@ const WORKER_COLORS = [
   chalk.green,
   chalk.yellow,
   chalk.magenta,
-  chalk.blue,
   chalk.gray,
   chalk.white,
   chalk.cyanBright,
@@ -22,7 +21,7 @@ function getWorkerInfo(): { id: string; color: typeof chalk; prefix: string } {
   if (cluster.isPrimary) {
     return {
       id: 'MASTER',
-      color: chalk.bold.white.bgBlue,
+      color: chalk.bold.blue,
       prefix: '[MASTER]',
     };
   }

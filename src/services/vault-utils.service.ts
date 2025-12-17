@@ -6,10 +6,14 @@ import {
   decodeFunctionResult,
   erc20Abi,
 } from 'viem';
+import { RpcRateLimitService } from './rpc-rate-limit/rpc-rate-limit.service';
+import { ChainId } from '../config/web3';
 
 @Injectable()
 export class VaultUtilsService {
   private readonly logger = new Logger(VaultUtilsService.name);
+
+  constructor(private readonly rpcRateLimitService: RpcRateLimitService) {}
   /**
    * Fetch vault configuration from blockchain
    */
@@ -17,6 +21,7 @@ export class VaultUtilsService {
     client: PublicClient,
     vaultAddress: `0x${string}`,
     shareToken: `0x${string}`,
+    chainId: ChainId,
   ): Promise<{
     factory: string;
     owner: string;
@@ -56,72 +61,88 @@ export class VaultUtilsService {
       imbalanceThresholdBps,
       pricer,
     ] = await Promise.all([
-      client.readContract({
-        address: vaultAddress,
-        abi: vaultAbi,
-        functionName: 'factory',
-      }),
-      client.readContract({
-        address: vaultAddress,
-        abi: vaultAbi,
-        functionName: 'owner',
-      }),
-      client.readContract({
-        address: vaultAddress,
-        abi: vaultAbi,
-        functionName: 'depositToken',
-      }),
-      client.readContract({
-        address: vaultAddress,
-        abi: vaultAbi,
-        functionName: 'depositFeed',
-      }),
-      client.readContract({
-        address: vaultAddress,
-        abi: vaultAbi,
-        functionName: 'assetCount',
-      }),
-      client.readContract({
-        address: vaultAddress,
-        abi: vaultAbi,
-        functionName: 'imbalanceThresholdBps',
-      }),
-      client.readContract({
-        address: vaultAddress,
-        abi: vaultAbi,
-        functionName: 'pricer',
-      }),
+      this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+        client.readContract({
+          address: vaultAddress,
+          abi: vaultAbi,
+          functionName: 'factory',
+        }),
+      ),
+      this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+        client.readContract({
+          address: vaultAddress,
+          abi: vaultAbi,
+          functionName: 'owner',
+        }),
+      ),
+      this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+        client.readContract({
+          address: vaultAddress,
+          abi: vaultAbi,
+          functionName: 'depositToken',
+        }),
+      ),
+      this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+        client.readContract({
+          address: vaultAddress,
+          abi: vaultAbi,
+          functionName: 'depositFeed',
+        }),
+      ),
+      this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+        client.readContract({
+          address: vaultAddress,
+          abi: vaultAbi,
+          functionName: 'assetCount',
+        }),
+      ),
+      this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+        client.readContract({
+          address: vaultAddress,
+          abi: vaultAbi,
+          functionName: 'imbalanceThresholdBps',
+        }),
+      ),
+      this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+        client.readContract({
+          address: vaultAddress,
+          abi: vaultAbi,
+          functionName: 'pricer',
+        }),
+      ),
     ]);
 
-    const rawPricerResults = await client.call({
-      to: pricer,
-      data: encodeFunctionData({
-        abi: [
-          {
-            type: 'function',
-            name: 'getAssets',
-            inputs: [],
-            outputs: [
+    const rawPricerResults = await this.rpcRateLimitService.executeWithRateLimit(
+      chainId,
+      () =>
+        client.call({
+          to: pricer,
+          data: encodeFunctionData({
+            abi: [
               {
-                type: 'tuple[]',
-                components: [
-                  { name: 'token', type: 'address' },
-                  { name: 'feed', type: 'address' },
-                  { name: 'v2Path', type: 'address[]' },
-                  { name: 'v3Path', type: 'bytes' },
-                  { name: 'v3PoolFee', type: 'uint24' },
+                type: 'function',
+                name: 'getAssets',
+                inputs: [],
+                outputs: [
+                  {
+                    type: 'tuple[]',
+                    components: [
+                      { name: 'token', type: 'address' },
+                      { name: 'feed', type: 'address' },
+                      { name: 'v2Path', type: 'address[]' },
+                      { name: 'v3Path', type: 'bytes' },
+                      { name: 'v3PoolFee', type: 'uint24' },
+                    ],
+                  },
                 ],
+                stateMutability: 'view',
               },
             ],
-            stateMutability: 'view',
-          },
-        ],
-        functionName: 'getAssets',
-        args: [],
-      }),
-    });
-  
-    console.log('rawPricerResults', rawPricerResults);
+            functionName: 'getAssets',
+            args: [],
+          }),
+        }),
+    );
   
     if (!rawPricerResults.data) {
       throw new Error('No data returned');
@@ -151,9 +172,12 @@ export class VaultUtilsService {
       data: rawPricerResults.data,
     });
 
-    const raw = await client.call({
-      to: vaultAddress,
-      data: encodeFunctionData({
+    const raw = await this.rpcRateLimitService.executeWithRateLimit(
+      chainId,
+      () =>
+        client.call({
+          to: vaultAddress,
+          data: encodeFunctionData({
         abi: [
           {
             type: 'function',
@@ -174,7 +198,8 @@ export class VaultUtilsService {
         functionName: 'getAssets',
         args: [],
       }),
-    });
+    }),
+    );
 
     if (!raw.data) {
       throw new Error('No data returned');
@@ -201,13 +226,15 @@ export class VaultUtilsService {
       data: raw.data,
     });
 
-    const pricingMode = await client.readContract({
-      address: pricer,
-      abi: parseAbi([
-        "function pricingMode() view returns (uint256)",
-      ]),
-      functionName: 'pricingMode',
-    })
+    const pricingMode = await this.rpcRateLimitService.executeWithRateLimit(
+      chainId,
+      () =>
+        client.readContract({
+          address: pricer,
+          abi: parseAbi(['function pricingMode() view returns (uint256)']),
+          functionName: 'pricingMode',
+        }),
+    );
 
     const pricingModeMap = new Map<number, string>([
       [0, 'V2_PLUS_FEED'],
@@ -245,16 +272,20 @@ export class VaultUtilsService {
     const assetDetailsPromises = assets.map(async (asset) => {
       try {
         const [symbol, decimals] = await Promise.all([
-          client.readContract({
-            address: asset.token as `0x${string}`,
-            abi: erc20Abi,
-            functionName: 'symbol',
-          }),
-          client.readContract({
-            address: asset.token as `0x${string}`,
-            abi: erc20Abi,
-            functionName: 'decimals',
-          }),
+          this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+            client.readContract({
+              address: asset.token as `0x${string}`,
+              abi: erc20Abi,
+              functionName: 'symbol',
+            }),
+          ),
+          this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+            client.readContract({
+              address: asset.token as `0x${string}`,
+              abi: erc20Abi,
+              functionName: 'decimals',
+            }),
+          ),
         ]);
         return {
           ...asset,
@@ -277,16 +308,20 @@ export class VaultUtilsService {
     let depositDecimals = 0;
     try {
       const [symbol, decimals] = await Promise.all([
-        client.readContract({
-          address: depositToken as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'symbol',
-        }),
-        client.readContract({
-          address: depositToken as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'decimals',
-        }),
+        this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+          client.readContract({
+            address: depositToken as `0x${string}`,
+            abi: erc20Abi,
+            functionName: 'symbol',
+          }),
+        ),
+        this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+          client.readContract({
+            address: depositToken as `0x${string}`,
+            abi: erc20Abi,
+            functionName: 'decimals',
+          }),
+        ),
       ]);
       depositSymbol = symbol as string;
       depositDecimals = Number(decimals);
@@ -300,11 +335,15 @@ export class VaultUtilsService {
     // Fetch decimals for shareToken
     let shareDecimals = 18; // Default to 18
     try {
-      const decimals = await client.readContract({
-        address: shareToken as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'decimals',
-      });
+      const decimals = await this.rpcRateLimitService.executeWithRateLimit(
+        chainId,
+        () =>
+          client.readContract({
+            address: shareToken as `0x${string}`,
+            abi: erc20Abi,
+            functionName: 'decimals',
+          }),
+      );
       shareDecimals = Number(decimals);
     } catch (error) {
       this.logger.error(
@@ -372,6 +411,7 @@ export class VaultUtilsService {
   async fetchVaultPortfolio(
     client: PublicClient,
     vaultAddress: `0x${string}`,
+    chainId: ChainId,
     shareDecimals?: number,
   ): Promise<{
     totalValue: string;
@@ -384,16 +424,20 @@ export class VaultUtilsService {
     ]);
 
     const [portfolioResult, nav] = await Promise.all([
-      client.readContract({
-        address: vaultAddress,
-        abi: vaultAbi,
-        functionName: 'getPortfolioValue',
-      }),
-      client.readContract({
-        address: vaultAddress,
-        abi: vaultAbi,
-        functionName: 'getNAV',
-      }),
+      this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+        client.readContract({
+          address: vaultAddress,
+          abi: vaultAbi,
+          functionName: 'getPortfolioValue',
+        }),
+      ),
+      this.rpcRateLimitService.executeWithRateLimit(chainId, () =>
+        client.readContract({
+          address: vaultAddress,
+          abi: vaultAbi,
+          functionName: 'getNAV',
+        }),
+      ),
     ]);
 
     const totalValue = portfolioResult[0] as bigint;

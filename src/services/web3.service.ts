@@ -3,13 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import {
   createPublicClient,
   createWalletClient,
-  http,
   type PublicClient,
   type WalletClient,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet, arbitrum } from 'viem/chains';
 import { ChainId, DEFAULT_RPC_URLS } from '../config/web3';
+import { createRateLimitedTransport } from './rpc-rate-limit/transport-wrapper';
 
 @Injectable()
 export class Web3Service {
@@ -19,41 +19,47 @@ export class Web3Service {
   private readonly privateKey: `0x${string}` | undefined;
 
   constructor(private readonly configService: ConfigService) {
-    const rpcUrls = this.configService.get<{ mainnet?: string; arbitrum?: string }>('rpcUrls');
-
-    const getRpcUrl = (chainId: ChainId): string => {
-      if (chainId === ChainId.MAINNET && rpcUrls?.mainnet) {
-        return rpcUrls.mainnet;
-      }
-      if (chainId === ChainId.ARBITRUM && rpcUrls?.arbitrum) {
-        return rpcUrls.arbitrum;
-      }
-      return DEFAULT_RPC_URLS[chainId];
+    // Get RPC config for retry settings
+    const rpcConfig = this.configService.get<any>('rpc');
+    const retryConfig = rpcConfig?.retry || {
+      maxRetries: 5,
+      baseDelay: 1000,
+      maxDelay: 300000,
     };
 
-    // Initialize public clients
-    const mainnetRpcUrl = getRpcUrl(ChainId.MAINNET);
-    const arbitrumRpcUrl = getRpcUrl(ChainId.ARBITRUM);
+    // Initialize public clients with rate-limited transport
     this.publicClients = {
       [ChainId.MAINNET]: createPublicClient({
         chain: mainnet,
-        transport: http(mainnetRpcUrl),
+        transport: createRateLimitedTransport(
+          DEFAULT_RPC_URLS[ChainId.MAINNET],
+          retryConfig,
+        ),
       }),
       [ChainId.ARBITRUM]: createPublicClient({
         chain: arbitrum,
-        transport: http(arbitrumRpcUrl),
+        transport: createRateLimitedTransport(
+          DEFAULT_RPC_URLS[ChainId.ARBITRUM],
+          retryConfig,
+        ),
       }),
     };
 
-    // Initialize wallet clients
+    // Initialize wallet clients with rate-limited transport
     this.walletClients = {
       [ChainId.MAINNET]: createWalletClient({
         chain: mainnet,
-        transport: http(getRpcUrl(ChainId.MAINNET)),
+        transport: createRateLimitedTransport(
+          DEFAULT_RPC_URLS[ChainId.MAINNET],
+          retryConfig,
+        ),
       }),
       [ChainId.ARBITRUM]: createWalletClient({
         chain: arbitrum,
-        transport: http(getRpcUrl(ChainId.ARBITRUM)),
+        transport: createRateLimitedTransport(
+          DEFAULT_RPC_URLS[ChainId.ARBITRUM],
+          retryConfig,
+        ),
       }),
     };
 

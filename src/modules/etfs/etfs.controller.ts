@@ -16,12 +16,12 @@ export class EtfsController {
   constructor(private readonly etfsService: EtfsService) {}
 
   @Get()
-  async getAll(@Query('page') page?: string, @Query('size') size?: string) {
+  async getAll(@Query('page') page?: string, @Query('size') size?: string, @Query('search') search?: string) {
     try {
       const pageNum = parseInt(page || '1', 10);
       const sizeNum = parseInt(size || '10', 10);
 
-      const result = await this.etfsService.getAll(pageNum, sizeNum);
+      const result = await this.etfsService.getAll(pageNum, sizeNum, search);
       return result;
     } catch (error) {
       if (error instanceof Error && error.message.includes('must be')) {
@@ -41,9 +41,9 @@ export class EtfsController {
   }
 
   @Get('deposit-tokens')
-  async getDepositTokens(@Query('chainId') chainId: number) {
+  async getDepositTokens(@Query('chainId') chainId: number, @Query('search') search?: string) {
     try {
-      return await this.etfsService.getDepositTokens(chainId);
+      return await this.etfsService.getDepositTokens(chainId, search);
     } catch (error) {
       throw new HttpException(
         {

@@ -26,6 +26,7 @@ import { Web3Service } from '../../services/web3.service';
 import { VaultUtilsService } from '../../services/vault-utils.service';
 import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
 import { EtfVolumeService } from '../../services/etf-volume.service';
+import { RpcRateLimitModule } from '../../services/rpc-rate-limit/rpc-rate-limit.module';
 import { EventProcessingJob } from './event-processing.job';
 import { ChainlinkSyncJob } from './chainlink-sync.job';
 import { RewardDistributionJob } from './reward-distribution.job';
@@ -33,6 +34,7 @@ import { VolumeSyncJob } from './volume-sync.job';
 
 @Module({
   imports: [
+    RpcRateLimitModule,
     MongooseModule.forFeature([
       { name: Event.name, schema: EventSchema },
       { name: ObserveEvents.name, schema: ObserveEventsSchema },

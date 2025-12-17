@@ -9,11 +9,13 @@ import { EtfResolverService } from '../../services/etf-resolver.service';
 import { UniswapV2ResolverService } from '../../services/uniswap-v2-resolver.service';
 import { UniswapV3ResolverService } from '../../services/uniswap-v3-resolver.service';
 import { ChainlinkDataFeedsModule } from '../chainlink-data-feeds/chainlink-data-feeds.module';
+import { RpcRateLimitModule } from '../../services/rpc-rate-limit/rpc-rate-limit.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: ETF.name, schema: ETFSchema }]),
     ChainlinkDataFeedsModule, // For ChainlinkResolverService
+    RpcRateLimitModule, // For RPC rate limiting
   ],
   controllers: [EtfsController, EtfController],
   providers: [
