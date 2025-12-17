@@ -16,6 +16,7 @@ import { ChainId } from '../../config/web3';
 import { TRANSACTION_POINTS } from '../../constants/transaction-points';
 import { verifyMessage, erc20Abi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { normalizeEthAddress } from '../../common/utils/eip55';
 
 @Injectable()
 export class RewardsService {
@@ -46,8 +47,9 @@ export class RewardsService {
   }
 
   async getWalletRewards(address: string) {
+    const normalizedAddress = normalizeEthAddress(address);
     const walletHolding = await this.walletHoldingModel.findOne({
-      wallet: { $regex: new RegExp(`^${address}$`, 'i') },
+      wallet: normalizedAddress,
     });
 
     if (!walletHolding) {
@@ -64,8 +66,9 @@ export class RewardsService {
   }
 
   async getUserTotalPoints(address: string) {
+    const normalizedAddress = normalizeEthAddress(address);
     const walletHolding = await this.walletHoldingModel.findOne({
-      wallet: { $regex: new RegExp(`^${address}$`, 'i') },
+      wallet: normalizedAddress,
     });
 
     if (!walletHolding) {
@@ -117,8 +120,9 @@ export class RewardsService {
     // Add this claim to the queue - it will wait for all previous claims to complete
     const currentClaim = this.claimQueue.then(async () => {
       try {
+        const normalizedAddress = normalizeEthAddress(address);
         const walletHolding = await this.walletHoldingModel.findOne({
-          wallet: { $regex: new RegExp(`^${address}$`, 'i') },
+          wallet: normalizedAddress,
         });
 
         if (!walletHolding) {

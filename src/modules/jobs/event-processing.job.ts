@@ -22,6 +22,7 @@ import {
   WalletHolding,
   WalletHoldingDocument,
 } from '../../models/wallet-holding.schema';
+import { normalizeEthAddress } from '../../common/utils/eip55';
 
 // Constants following the Go code pattern
 const ETH_BLOCK_CONFIRMATION_DELAY = 4n; // Minimum number of confirmations for a block to be considered valid
@@ -211,10 +212,11 @@ export class EventProcessingJob {
     user: string,
     holdingsMap: Map<string, WalletHoldingData>,
   ): WalletHoldingData {
-    let walletHolding = holdingsMap.get(user);
+    const normalizedWallet = normalizeEthAddress(user);
+    let walletHolding = holdingsMap.get(normalizedWallet);
     if (!walletHolding) {
       walletHolding = {
-        wallet: user,
+        wallet: normalizedWallet,
         deposits: [],
         rewards: [],
         createEtfCount: 0,
@@ -224,7 +226,7 @@ export class EventProcessingJob {
         volumeTradedUSD: 0,
         tvl: 0,
       };
-      holdingsMap.set(user, walletHolding);
+      holdingsMap.set(normalizedWallet, walletHolding);
     }
     return walletHolding;
   }
@@ -241,10 +243,11 @@ export class EventProcessingJob {
     chainId: ChainId,
     vault: string,
   ): number {
+    const normalizedVault = normalizeEthAddress(vault);
     return deposits.findIndex(
       (deposit) =>
         deposit.chain === Number(chainId) &&
-        (deposit.etfVaultAddress === vault ||
+        (deposit.etfVaultAddress === normalizedVault ||
           (!deposit.etfVaultAddress && deposit.symbol === vault)),
     );
   }
@@ -272,8 +275,8 @@ export class EventProcessingJob {
       chain: Number(chainId),
       symbol: etf.symbol,
       decimals: shareDecimals,
-      etfVaultAddress: etf.vault,
-      etfTokenAddress: etf.shareToken,
+      etfVaultAddress: normalizeEthAddress(etf.vault),
+      etfTokenAddress: normalizeEthAddress(etf.shareToken),
       amount: amount.toString(),
       amountUSD: etf.sharePrice
         ? etf.sharePrice * sharesInHumanReadable
@@ -294,11 +297,14 @@ export class EventProcessingJob {
 
     if (!vault || !user || !sharesOut) return;
 
+    const normalizedVault = normalizeEthAddress(vault);
+    const normalizedUser = normalizeEthAddress(user);
+
     // Get or create wallet holding
-    const walletHolding = this.getOrCreateWalletHolding(user, holdingsMap);
+    const walletHolding = this.getOrCreateWalletHolding(normalizedUser, holdingsMap);
 
     // Get ETF from database
-    const etf = await this.etfModel.findOne({ vault: vault });
+    const etf = await this.etfModel.findOne({ vault: normalizedVault });
 
     if (!etf) {
       this.logger.warn(`ETF not found for vault ${vault}`);
@@ -324,8 +330,8 @@ export class EventProcessingJob {
       // Always update metadata if ETF is available (to fix old deposits with wrong symbol)
       walletHolding.deposits[depositIndex].symbol = etf.symbol;
       walletHolding.deposits[depositIndex].decimals = etf.shareDecimals ?? 18;
-      walletHolding.deposits[depositIndex].etfVaultAddress = etf.vault;
-      walletHolding.deposits[depositIndex].etfTokenAddress = etf.shareToken;
+      walletHolding.deposits[depositIndex].etfVaultAddress = normalizeEthAddress(etf.vault);
+      walletHolding.deposits[depositIndex].etfTokenAddress = normalizeEthAddress(etf.shareToken);
     } else {
       // Create new deposit
       const deposit = this.createDepositObject(chainId, etf, vault, sharesOut);
@@ -358,11 +364,14 @@ export class EventProcessingJob {
 
     if (!vault || !user || !sharesIn) return;
 
+    const normalizedVault = normalizeEthAddress(vault);
+    const normalizedUser = normalizeEthAddress(user);
+
     // Get or create wallet holding
-    const walletHolding = this.getOrCreateWalletHolding(user, holdingsMap);
+    const walletHolding = this.getOrCreateWalletHolding(normalizedUser, holdingsMap);
 
     // Get ETF from database
-    const etf = await this.etfModel.findOne({ vault: vault });
+    const etf = await this.etfModel.findOne({ vault: normalizedVault });
 
     if (!etf) {
       this.logger.warn(`ETF not found for vault ${vault}`);
@@ -435,6 +444,8 @@ export class EventProcessingJob {
 
     if (!vault) return;
 
+    const normalizedVault = normalizeEthAddress(vault);
+
     // Try to get the creator wallet from transaction
     if (log.transactionHash) {
       try {
@@ -462,7 +473,7 @@ export class EventProcessingJob {
 
       // Create new ETF entry with vault configuration
       await this.etfModel.create({
-        vault: vault,
+        vault: normalizedVault,
         owner: vaultConfig.owner,
         pricer: vaultConfig.pricer,
         pricingMode: vaultConfig.pricingMode,
@@ -485,12 +496,12 @@ export class EventProcessingJob {
         shareDecimals: vaultConfig.shareDecimals,
       });
 
-      this.logger.log(`ETF created: ${vault} (${name}/${symbol})`);
+      this.logger.log(`ETF created: ${normalizedVault} (${name}/${symbol})`);
     } catch (error) {
-      this.logger.error(`Error fetching vault config for ${vault}:`, error);
+      this.logger.error(`Error fetching vault config for ${normalizedVault}:`, error);
       // Still create ETF entry with basic info from event
       await this.etfModel.create({
-        vault: vault,
+        vault: normalizedVault,
         chain: Number(chainId),
         shareToken: shareToken ?? '',
         depositToken: '',
@@ -518,11 +529,13 @@ export class EventProcessingJob {
 
     if (!vault) return;
 
+    const normalizedVault = normalizeEthAddress(vault);
+
     // Find all wallets that have deposits in this vault
     try {
       const walletHoldings = await this.walletHoldingModel
         .find({
-          'deposits.etfVaultAddress': vault,
+          'deposits.etfVaultAddress': normalizedVault,
           'deposits.chain': Number(chainId),
         })
         .lean()
@@ -539,7 +552,7 @@ export class EventProcessingJob {
       }
     } catch (error) {
       this.logger.error(
-        `Error finding wallets for rebalance event in vault ${vault}:`,
+        `Error finding wallets for rebalance event in vault ${normalizedVault}:`,
         error,
       );
     }
@@ -731,8 +744,9 @@ export class EventProcessingJob {
    */
   private async saveEvent(log: EventLog, chainId: ChainId): Promise<void> {
     const vault = log.args.vault;
-    const etf = vault
-      ? await this.etfModel.findOne({ vault: vault })
+    const normalizedVault = vault ? normalizeEthAddress(vault) : undefined;
+    const etf = normalizedVault
+      ? await this.etfModel.findOne({ vault: normalizedVault })
       : undefined;
     const depositDecimals = etf?.depositDecimals ?? 18;
     const shareTokenDecimals = etf?.shareDecimals ?? 18;
@@ -740,14 +754,14 @@ export class EventProcessingJob {
     const eventData: Partial<Event> = {
       type: log.eventName,
       chain: Number(chainId),
-      user: log.args.user ?? undefined,
-      token: log.args.token ?? undefined,
+      user: log.args.user ? normalizeEthAddress(log.args.user) : undefined,
+      token: log.args.token ? normalizeEthAddress(log.args.token) : undefined,
       amount: log.args.amount
         ? this.vaultUtils.formatTokenAmount(log.args.amount, 18)
         : undefined,
       nonce: (log.args.eventNonce ?? log.args.nonce ?? 0n).toString(),
       blockNumber: log.blockNumber.toString(),
-      vault: log.args.vault ?? undefined,
+      vault: normalizedVault ?? undefined,
       depositAmount: log.args.depositAmount
         ? this.vaultUtils.formatTokenAmount(
             log.args.depositAmount,
@@ -802,8 +816,8 @@ export class EventProcessingJob {
         : undefined,
       eventHeight: log.args.eventHeight?.toString(),
       etfNonce: log.args.etfNonce?.toString(),
-      shareToken: log.args.shareToken ?? undefined,
-      depositToken: log.args.depositToken ?? undefined,
+      shareToken: log.args.shareToken ? normalizeEthAddress(log.args.shareToken) : undefined,
+      depositToken: log.args.depositToken ? normalizeEthAddress(log.args.depositToken) : undefined,
       name: log.args.name ?? undefined,
       symbol: log.args.symbol ?? undefined,
     };
@@ -822,9 +836,14 @@ export class EventProcessingJob {
       chain: deposit.chain,
       symbol: deposit.symbol,
       decimals: deposit.decimals ?? 18,
-      etfVaultAddress: deposit.etfVaultAddress ?? deposit.symbol,
-      etfTokenAddress:
-        deposit.etfTokenAddress ?? deposit.etfVaultAddress ?? deposit.symbol,
+      etfVaultAddress: deposit.etfVaultAddress 
+        ? normalizeEthAddress(deposit.etfVaultAddress) 
+        : deposit.symbol,
+      etfTokenAddress: deposit.etfTokenAddress 
+        ? normalizeEthAddress(deposit.etfTokenAddress)
+        : deposit.etfVaultAddress 
+          ? normalizeEthAddress(deposit.etfVaultAddress) 
+          : deposit.symbol,
       amount: deposit.amount?.toString() ?? '0',
       amountUSD: deposit.amountUSD ?? 0,
     }));
@@ -868,7 +887,7 @@ export class EventProcessingJob {
     } else {
       // Insert new
       await this.walletHoldingModel.create({
-        wallet: walletHolding.wallet,
+        wallet: normalizeEthAddress(walletHolding.wallet),
         deposits,
         rewards: [],
         tvl: walletHolding.tvl ?? 0,
@@ -878,7 +897,7 @@ export class EventProcessingJob {
         rebalanceCount: walletHolding.rebalanceCount ?? 0,
         volumeTradedUSD: walletHolding.volumeTradedUSD || 0,
       });
-      existingWalletSet.add(walletHolding.wallet);
+      existingWalletSet.add(normalizeEthAddress(walletHolding.wallet));
     }
   }
 
@@ -965,9 +984,10 @@ export class EventProcessingJob {
             const { vault } = log.args;
             if (vault) {
               try {
+                const normalizedVault = normalizeEthAddress(vault);
                 const walletHoldings = await this.walletHoldingModel
                   .find({
-                    'deposits.etfVaultAddress': vault,
+                    'deposits.etfVaultAddress': normalizedVault,
                     'deposits.chain': Number(chainId),
                   })
                   .lean()
@@ -1023,9 +1043,10 @@ export class EventProcessingJob {
     // Update each ETF individually
     for (const vaultAddress of vaultAddresses) {
       try {
+        const normalizedVaultAddress = normalizeEthAddress(vaultAddress);
         // Find ETF that needs updating (not updated in the last minute)
         const etf = await this.etfModel.findOne({
-          vault: vaultAddress,
+          vault: normalizedVaultAddress,
           chain: Number(chainId),
           $or: [
             { updatedAt: { $lt: oneMinuteAgo } },
@@ -1255,7 +1276,7 @@ export class EventProcessingJob {
     const walletAddresses = new Set<string>();
     for (const log of newEvents) {
       const user = log.args.user;
-      if (user) walletAddresses.add(user);
+      if (user) walletAddresses.add(normalizeEthAddress(user));
     }
 
     // Fetch all existing wallet holdings in one query
@@ -1265,8 +1286,9 @@ export class EventProcessingJob {
     const holdingsMap = new Map<string, WalletHoldingData>();
     const existingWalletSet = new Set<string>();
     for (const holding of existingHoldings) {
-      holdingsMap.set(holding.wallet, {
-        wallet: holding.wallet,
+      const normalizedWallet = normalizeEthAddress(holding.wallet);
+      holdingsMap.set(normalizedWallet, {
+        wallet: normalizedWallet,
         deposits: holding.deposits,
         rewards: holding.rewards,
         createEtfCount: holding.createEtfCount ?? 0,
@@ -1277,7 +1299,7 @@ export class EventProcessingJob {
         tvl: holding.tvl,
         _id: holding._id,
       });
-      existingWalletSet.add(holding.wallet);
+      existingWalletSet.add(normalizedWallet);
     }
 
     // Process all events one by one, saving each immediately

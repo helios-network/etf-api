@@ -10,6 +10,7 @@ import { ETF, ETFDocument } from '../../models/etf.schema';
 import { PortfolioResponseDto } from './dto/portfolio-response.dto';
 import { PortfolioAssetDto } from './dto/portfolio-asset.dto';
 import { PortfolioSummaryDto, AllocationDto } from './dto/portfolio-summary.dto';
+import { normalizeEthAddress } from '../../common/utils/eip55';
 
 @Injectable()
 export class PortfolioService {
@@ -23,15 +24,6 @@ export class PortfolioService {
     private readonly cacheService: CacheService,
   ) {}
 
-  /**
-   * Normalize Ethereum address to lowercase
-   */
-  private normalizeAddress(address: string): string {
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      throw new Error('Invalid Ethereum address format');
-    }
-    return address.toLowerCase();
-  }
 
   /**
    * Enrich deposit with ETF metadata
@@ -119,7 +111,7 @@ export class PortfolioService {
     data?: PortfolioResponseDto;
     message?: string;
   }> {
-    const normalizedAddress = this.normalizeAddress(address);
+    const normalizedAddress = normalizeEthAddress(address);
     const cacheKey = `portfolio:summary:${normalizedAddress}`;
 
     return await this.cacheService.wrap(
@@ -127,7 +119,7 @@ export class PortfolioService {
       async () => {
         const walletHolding = await this.walletHoldingModel
           .findOne({
-            wallet: { $regex: new RegExp(`^${normalizedAddress}$`, 'i') },
+            wallet: normalizedAddress,
           })
           .lean()
           .exec();
@@ -176,7 +168,7 @@ export class PortfolioService {
     data?: PortfolioAssetDto[];
     message?: string;
   }> {
-    const normalizedAddress = this.normalizeAddress(address);
+    const normalizedAddress = normalizeEthAddress(address);
     // Cache key includes filters to differentiate cached results
     const cacheKey = `portfolio:assets:${normalizedAddress}:chain=${chain || 'all'}:symbol=${symbol || 'all'}`;
 
@@ -185,7 +177,7 @@ export class PortfolioService {
       async () => {
         const walletHolding = await this.walletHoldingModel
           .findOne({
-            wallet: { $regex: new RegExp(`^${normalizedAddress}$`, 'i') },
+            wallet: normalizedAddress,
           })
           .lean()
           .exec();
@@ -216,7 +208,7 @@ export class PortfolioService {
 
         // Extract unique vault addresses
         const vaultAddresses = [
-          ...new Set(deposits.map((d) => d.etfVaultAddress)),
+          ...new Set(deposits.map((d) => normalizeEthAddress(d.etfVaultAddress))),
         ];
 
         // Fetch all ETFs in one query
@@ -229,12 +221,13 @@ export class PortfolioService {
 
         // Create Map for O(1) lookup
         const etfMap = new Map<string, ETF>(
-          etfs.map((etf) => [etf.vault, etf]),
+          etfs.map((etf) => [normalizeEthAddress(etf.vault), etf]),
         );
 
         // Enrich deposits with ETF data
         const enrichedAssets = deposits.map((deposit) => {
-          const etf = etfMap.get(deposit.etfVaultAddress) || null;
+          const normalizedVaultAddress = normalizeEthAddress(deposit.etfVaultAddress);
+          const etf = etfMap.get(normalizedVaultAddress) || null;
           return this.enrichDepositWithETF(deposit, etf);
         });
 
@@ -258,7 +251,7 @@ export class PortfolioService {
     data?: PortfolioSummaryDto;
     message?: string;
   }> {
-    const normalizedAddress = this.normalizeAddress(address);
+    const normalizedAddress = normalizeEthAddress(address);
     const cacheKey = `portfolio:summary:${normalizedAddress}`;
 
     return await this.cacheService.wrap(
@@ -266,7 +259,7 @@ export class PortfolioService {
       async () => {
         const walletHolding = await this.walletHoldingModel
           .findOne({
-            wallet: { $regex: new RegExp(`^${normalizedAddress}$`, 'i') },
+            wallet: normalizedAddress,
           })
           .lean()
           .exec();
@@ -295,7 +288,7 @@ export class PortfolioService {
 
         // Extract unique vault addresses
         const vaultAddresses = [
-          ...new Set(deposits.map((d) => d.etfVaultAddress)),
+          ...new Set(deposits.map((d) => normalizeEthAddress(d.etfVaultAddress))),
         ];
 
         // Fetch all ETFs in one query
@@ -308,12 +301,13 @@ export class PortfolioService {
 
         // Create Map for O(1) lookup
         const etfMap = new Map<string, ETF>(
-          etfs.map((etf) => [etf.vault, etf]),
+          etfs.map((etf) => [normalizeEthAddress(etf.vault), etf]),
         );
 
         // Enrich deposits with ETF data
         const enrichedAssets = deposits.map((deposit) => {
-          const etf = etfMap.get(deposit.etfVaultAddress) || null;
+          const normalizedVaultAddress = normalizeEthAddress(deposit.etfVaultAddress);
+          const etf = etfMap.get(normalizedVaultAddress) || null;
           return this.enrichDepositWithETF(deposit, etf);
         });
 

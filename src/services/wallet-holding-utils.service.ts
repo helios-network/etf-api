@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ETF, ETFDocument } from '../models/etf.schema';
+import { normalizeEthAddress } from '../common/utils/eip55';
 
 @Injectable()
 export class WalletHoldingUtilsService {
@@ -46,7 +47,8 @@ export class WalletHoldingUtilsService {
       }
 
       // Get ETF from database using the vault address from the deposit
-      const etf = await this.etfModel.findOne({ vault: vaultAddress });
+      const normalizedVaultAddress = normalizeEthAddress(vaultAddress);
+      const etf = await this.etfModel.findOne({ vault: normalizedVaultAddress });
 
       if (!etf) {
         // ETF not found, skip this deposit

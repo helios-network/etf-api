@@ -6,6 +6,7 @@ import { WalletHolding, WalletHoldingDocument } from '../../models/wallet-holdin
 import { ETF, ETFDocument } from '../../models/etf.schema';
 import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
 import { TRANSACTION_POINTS } from '../../constants/transaction-points';
+import { normalizeEthAddress } from '../../common/utils/eip55';
 
 @Injectable()
 export class LeaderBoardService {
@@ -77,7 +78,8 @@ export class LeaderBoardService {
         }
 
         try {
-          const etf = await this.etfModel.findOne({ vault: vaultAddress });
+          const normalizedVaultAddress = normalizeEthAddress(vaultAddress);
+          const etf = await this.etfModel.findOne({ vault: normalizedVaultAddress });
           if (!etf || !etf.sharePrice || etf.sharePrice <= 0) {
             continue;
           }

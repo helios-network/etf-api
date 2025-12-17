@@ -8,6 +8,7 @@ import {
 import { Event, EventDocument } from '../../models/event.schema';
 import { ETF, ETFDocument } from '../../models/etf.schema';
 import { TRANSACTION_POINTS } from '../../constants/transaction-points';
+import { normalizeEthAddress } from '../../common/utils/eip55';
 
 const BATCH_SIZE = 100; // Number of wallets to process per batch
 
@@ -91,11 +92,13 @@ export class VolumeSyncJob {
    * Calculate volumeTradedUSD from historical Deposit and Redeem events
    */
   private async calculateVolumeFromEvents(walletAddress: string): Promise<number> {
+    const normalizedWalletAddress = normalizeEthAddress(walletAddress);
+    
     // Get all Deposit and Redeem events for this wallet
     const depositEvents = await this.eventModel
       .find({
         type: 'Deposit',
-        user: { $regex: new RegExp(`^${walletAddress}$`, 'i') },
+        user: normalizedWalletAddress,
       })
       .sort({ blockNumber: 1, nonce: 1 })
       .lean()
@@ -104,7 +107,7 @@ export class VolumeSyncJob {
     const redeemEvents = await this.eventModel
       .find({
         type: 'Redeem',
-        user: { $regex: new RegExp(`^${walletAddress}$`, 'i') },
+        user: normalizedWalletAddress,
       })
       .sort({ blockNumber: 1, nonce: 1 })
       .lean()
@@ -119,8 +122,10 @@ export class VolumeSyncJob {
       }
 
       try {
+        const normalizedVault = event.vault ? normalizeEthAddress(event.vault) : undefined;
+        if (!normalizedVault) continue;
         const volume = await this.calculateEventVolume(
-          event.vault,
+          normalizedVault,
           event.chain,
           BigInt(event.sharesOut),
           event.blockNumber,
@@ -141,8 +146,9 @@ export class VolumeSyncJob {
       }
 
       try {
+        const normalizedVault = normalizeEthAddress(event.vault);
         const volume = await this.calculateEventVolume(
-          event.vault,
+          normalizedVault,
           event.chain,
           BigInt(event.sharesIn),
           event.blockNumber,
@@ -169,8 +175,9 @@ export class VolumeSyncJob {
     shares: bigint,
     blockNumber: string,
   ): Promise<number> {
+    const normalizedVault = normalizeEthAddress(vault);
     // Get ETF
-    const etf = await this.etfModel.findOne({ vault, chain }).lean().exec();
+    const etf = await this.etfModel.findOne({ vault: normalizedVault, chain }).lean().exec();
 
     if (!etf) {
       this.logger.warn(`ETF not found for vault ${vault} on chain ${chain}`);
@@ -197,10 +204,11 @@ export class VolumeSyncJob {
   async resyncVolumeForWallet(walletAddress: string): Promise<number> {
     this.logger.log(`Resyncing volume for wallet ${walletAddress}...`);
 
-    const newVolume = await this.calculateVolumeFromEvents(walletAddress);
+    const normalizedWalletAddress = normalizeEthAddress(walletAddress);
+    const newVolume = await this.calculateVolumeFromEvents(normalizedWalletAddress);
 
     await this.walletHoldingModel.updateOne(
-      { wallet: { $regex: new RegExp(`^${walletAddress}$`, 'i') } },
+      { wallet: normalizedWalletAddress },
       { $set: { volumeTradedUSD: newVolume } },
     );
 
@@ -222,11 +230,13 @@ export class VolumeSyncJob {
     redeemCount: number;
     rebalanceCount: number;
   }> {
+    const normalizedWalletAddress = normalizeEthAddress(walletAddress);
+    
     // Count Deposit events
     const depositCount = await this.eventModel
       .countDocuments({
         type: 'Deposit',
-        user: { $regex: new RegExp(`^${walletAddress}$`, 'i') },
+        user: normalizedWalletAddress,
       })
       .exec();
 
@@ -234,7 +244,7 @@ export class VolumeSyncJob {
     const redeemCount = await this.eventModel
       .countDocuments({
         type: 'Redeem',
-        user: { $regex: new RegExp(`^${walletAddress}$`, 'i') },
+        user: normalizedWalletAddress,
       })
       .exec();
 
@@ -243,7 +253,7 @@ export class VolumeSyncJob {
     const createEtfCount = await this.eventModel
       .countDocuments({
         type: 'ETFCreated',
-        user: { $regex: new RegExp(`^${walletAddress}$`, 'i') },
+        user: normalizedWalletAddress,
       })
       .exec();
 
@@ -251,7 +261,7 @@ export class VolumeSyncJob {
     // where this wallet has deposits
     const walletHolding = await this.walletHoldingModel
       .findOne({
-        wallet: { $regex: new RegExp(`^${walletAddress}$`, 'i') },
+        wallet: normalizedWalletAddress,
       })
       .lean()
       .exec();
@@ -268,11 +278,13 @@ export class VolumeSyncJob {
       ];
 
       if (vaultAddresses.length > 0) {
+        // Normalize vault addresses
+        const normalizedVaultAddresses = vaultAddresses.map(v => normalizeEthAddress(v));
         // Count Rebalance events for these vaults
         rebalanceCount = await this.eventModel
           .countDocuments({
             type: 'Rebalance',
-            vault: { $in: vaultAddresses },
+            vault: { $in: normalizedVaultAddresses },
           })
           .exec();
       }
@@ -379,10 +391,11 @@ export class VolumeSyncJob {
       `Resyncing transaction counts for wallet ${walletAddress}...`,
     );
 
-    const counts = await this.calculateTransactionCountsFromEvents(walletAddress);
+    const normalizedWalletAddress = normalizeEthAddress(walletAddress);
+    const counts = await this.calculateTransactionCountsFromEvents(normalizedWalletAddress);
 
     await this.walletHoldingModel.updateOne(
-      { wallet: { $regex: new RegExp(`^${walletAddress}$`, 'i') } },
+      { wallet: normalizedWalletAddress },
       {
         $set: {
           createEtfCount: counts.createEtfCount,
