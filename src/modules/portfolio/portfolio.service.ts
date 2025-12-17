@@ -228,6 +228,7 @@ export class PortfolioService {
         const enrichedAssets = deposits.map((deposit) => {
           const normalizedVaultAddress = normalizeEthAddress(deposit.etfVaultAddress);
           const etf = etfMap.get(normalizedVaultAddress) || null;
+          deposit.amountUSD = (etf?.sharePrice ?? 0) * Number(deposit.amount) / Math.pow(10, etf?.shareDecimals ?? 18);
           return this.enrichDepositWithETF(deposit, etf);
         });
 
