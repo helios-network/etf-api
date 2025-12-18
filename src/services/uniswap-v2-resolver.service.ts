@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { type PublicClient, parseAbi, encodeAbiParameters } from 'viem';
+import { parseAbi, encodeAbiParameters } from 'viem';
 import { ASSETS_ADDRS, UNISWAP_V2_FACTORY_ADDRS, UNISWAP_V2_ROUTER_ADDRS } from '../constants';
 import { V2PoolInfo } from '../types/etf-verify.types';
-import { RpcRateLimitService } from './rpc-rate-limit/rpc-rate-limit.service';
+import { RpcClientService } from './rpc-client/rpc-client.service';
 import { ChainId } from '../config/web3';
 
 /**
@@ -32,20 +32,19 @@ const V2_ROUTER_ABI = parseAbi([
 export class UniswapV2ResolverService {
   private readonly logger = new Logger(UniswapV2ResolverService.name);
 
-  constructor(private readonly rpcRateLimitService: RpcRateLimitService) {}
+  constructor(private readonly rpcClientService: RpcClientService) {}
   /**
    * Check if a V2 pool exists between two tokens
    */
   async checkV2Pool(
-    client: PublicClient,
     chainId: number,
     tokenA: `0x${string}`,
     tokenB: `0x${string}`,
   ): Promise<{ exists: boolean; pairAddress: `0x${string}` | null }> {
     try {
-      const pairAddress = await this.rpcRateLimitService.executeWithRateLimit(
+      const pairAddress = await this.rpcClientService.execute(
         chainId as ChainId,
-        () =>
+        (client) =>
           client.readContract({
             address: UNISWAP_V2_FACTORY_ADDRS[chainId] as `0x${string}`,
             abi: V2_FACTORY_ABI,
@@ -69,14 +68,13 @@ export class UniswapV2ResolverService {
    * Get reserves from a V2 pair
    */
   async getV2Reserves(
-    client: PublicClient,
     pairAddress: `0x${string}`,
     chainId: number,
   ): Promise<{ reserve0: bigint; reserve1: bigint } | null> {
     try {
-      const [reserve0, reserve1] = await this.rpcRateLimitService.executeWithRateLimit(
+      const [reserve0, reserve1] = await this.rpcClientService.execute(
         chainId as ChainId,
-        () =>
+        (client) =>
           client.readContract({
             address: pairAddress,
             abi: V2_PAIR_ABI,
@@ -99,7 +97,6 @@ export class UniswapV2ResolverService {
    * Uses a quote from the router to estimate USD value
    */
   async calculateV2LiquidityUSD(
-    client: PublicClient,
     chainId: number,
     tokenA: `0x${string}`,
     tokenB: `0x${string}`,
@@ -109,12 +106,12 @@ export class UniswapV2ResolverService {
     tokenBPriceUSD: number | null,
   ): Promise<number> {
     try {
-      const { exists, pairAddress } = await this.checkV2Pool(client, chainId, tokenA, tokenB);
+      const { exists, pairAddress } = await this.checkV2Pool(chainId, tokenA, tokenB);
       if (!exists || !pairAddress) {
         return 0;
       }
 
-      const reserves = await this.getV2Reserves(client, pairAddress, chainId);
+      const reserves = await this.getV2Reserves(pairAddress, chainId);
 
       if (!reserves) {
         return 0;
@@ -122,18 +119,18 @@ export class UniswapV2ResolverService {
 
       // Get token0 and token1 to determine order
       const [token0, token1] = await Promise.all([
-        this.rpcRateLimitService.executeWithRateLimit(
+        this.rpcClientService.execute(
           chainId as ChainId,
-          () =>
+          (client) =>
             client.readContract({
               address: pairAddress,
               abi: V2_PAIR_ABI,
               functionName: 'token0',
             }),
         ),
-        this.rpcRateLimitService.executeWithRateLimit(
+        this.rpcClientService.execute(
           chainId as ChainId,
-          () =>
+          (client) =>
             client.readContract({
               address: pairAddress,
               abi: V2_PAIR_ABI,
@@ -158,9 +155,9 @@ export class UniswapV2ResolverService {
       // Quote swapping 1 tokenA to tokenB, then estimate USD
       const amountIn = BigInt(10 ** tokenADecimals); // 1 token
       try {
-        const amountsOut = await this.rpcRateLimitService.executeWithRateLimit(
+        const amountsOut = await this.rpcClientService.execute(
           chainId as ChainId,
-          () =>
+          (client) =>
             client.readContract({
               address: UNISWAP_V2_ROUTER_ADDRS[chainId] as `0x${string}`,
               abi: V2_ROUTER_ABI,
@@ -206,7 +203,7 @@ export class UniswapV2ResolverService {
    * Get WETH price in USDC using Uniswap V2
    * This is used when targetTokenPriceUSD is null or 0
    */
-  async getWETHPriceInUSDC(client: PublicClient, chainId: number): Promise<number | null> {
+  async getWETHPriceInUSDC(chainId: number): Promise<number | null> {
     try {
       const WETH = ASSETS_ADDRS[chainId].WETH as `0x${string}`;
       const USDC = ASSETS_ADDRS[chainId].USDC as `0x${string}`;
@@ -214,7 +211,7 @@ export class UniswapV2ResolverService {
       const USDC_DECIMALS = 6;
 
       // Check if WETH/USDC pool exists
-      const { exists } = await this.checkV2Pool(client, chainId, WETH, USDC);
+      const { exists } = await this.checkV2Pool(chainId, WETH, USDC);
       if (!exists) {
         this.logger.warn('WETH/USDC pool does not exist on Uniswap V2');
         return null;
@@ -222,9 +219,9 @@ export class UniswapV2ResolverService {
 
       // Quote 1 WETH in USDC
       const amountIn = BigInt(10 ** WETH_DECIMALS); // 1 WETH
-      const amountsOut = await this.rpcRateLimitService.executeWithRateLimit(
+      const amountsOut = await this.rpcClientService.execute(
         chainId as ChainId,
-        () =>
+        (client) =>
           client.readContract({
             address: UNISWAP_V2_ROUTER_ADDRS[chainId] as `0x${string}`,
             abi: V2_ROUTER_ABI,
@@ -248,7 +245,6 @@ export class UniswapV2ResolverService {
    * Find V2 path from depositToken to targetToken (1 or 2 hops max)
    */
   async findV2Path(
-    client: PublicClient,
     chainId: number,
     depositToken: `0x${string}`,
     targetToken: `0x${string}`,
@@ -259,7 +255,6 @@ export class UniswapV2ResolverService {
   ): Promise<V2PoolInfo> {
     // Try direct path first
     const directLiquidity = await this.calculateV2LiquidityUSD(
-      client,
       chainId,
       depositToken,
       targetToken,
@@ -286,7 +281,6 @@ export class UniswapV2ResolverService {
     }
     // Check depositToken -> WETH
     const depositToWethLiquidity = await this.calculateV2LiquidityUSD(
-      client,
       chainId,
       depositToken,
       WETH,
@@ -299,7 +293,7 @@ export class UniswapV2ResolverService {
     // Get WETH price in USDC using Uniswap V2 (needed when targetTokenPriceUSD is null or 0)
     let wethPrice: number | null = null;
     if (!targetTokenPriceUSD || targetTokenPriceUSD === 0) {
-      wethPrice = await this.getWETHPriceInUSDC(client, chainId);
+      wethPrice = await this.getWETHPriceInUSDC(chainId);
       if (!wethPrice) {
         this.logger.warn(
           'Could not get WETH price in USDC, cannot calculate liquidity for WETH -> targetToken path',
@@ -309,7 +303,6 @@ export class UniswapV2ResolverService {
 
     // Check WETH -> targetToken
     const wethToTargetLiquidity = await this.calculateV2LiquidityUSD(
-      client,
       chainId,
       WETH,
       targetToken,

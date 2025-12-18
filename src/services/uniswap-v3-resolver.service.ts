@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { type PublicClient, parseAbi, encodePacked } from 'viem';
+import { parseAbi, encodePacked } from 'viem';
 import {
   UNISWAP_V3_FACTORY_ADDRS,
   UNISWAP_V3_FEES,
@@ -7,7 +7,7 @@ import {
   ASSETS_ADDRS,
 } from '../constants';
 import { V3PoolInfo, V3PathInfo } from '../types/etf-verify.types';
-import { RpcRateLimitService } from './rpc-rate-limit/rpc-rate-limit.service';
+import { RpcClientService } from './rpc-client/rpc-client.service';
 import { ChainId } from '../config/web3';
 import { ethers } from 'ethers';
 
@@ -40,21 +40,22 @@ const V3_QUOTER_ABI = parseAbi([
 export class UniswapV3ResolverService {
   private readonly logger = new Logger(UniswapV3ResolverService.name);
 
-  constructor(private readonly rpcRateLimitService: RpcRateLimitService) {}
+  constructor(
+    private readonly rpcClientService: RpcClientService,
+  ) {}
   /**
    * Check if a V3 pool exists for a given fee tier
    */
   async checkV3Pool(
-    client: PublicClient,
     chainId: number,
     tokenA: `0x${string}`,
     tokenB: `0x${string}`,
     fee: number,
   ): Promise<{ exists: boolean; poolAddress: `0x${string}` | null }> {
     try {
-      const poolAddress = await this.rpcRateLimitService.executeWithRateLimit(
+      const poolAddress = await this.rpcClientService.execute(
         chainId as ChainId,
-        () =>
+        (client) =>
           client.readContract({
             address: UNISWAP_V3_FACTORY_ADDRS[chainId] as `0x${string}`,
             abi: V3_FACTORY_ABI,
@@ -78,14 +79,13 @@ export class UniswapV3ResolverService {
    * Get liquidity from a V3 pool
    */
   async getV3Liquidity(
-    client: PublicClient,
     poolAddress: `0x${string}`,
     chainId: number,
   ): Promise<bigint | null> {
     try {
-      const liquidity = await this.rpcRateLimitService.executeWithRateLimit(
+      const liquidity = await this.rpcClientService.execute(
         chainId as ChainId,
-        () =>
+        (client) =>
           client.readContract({
             address: poolAddress,
             abi: V3_POOL_ABI,
@@ -105,7 +105,6 @@ export class UniswapV3ResolverService {
    * Uses quoter to estimate USD value
    */
   async calculateV3LiquidityUSD(
-    client: PublicClient,
     chainId: number,
     tokenA: `0x${string}`,
     tokenB: `0x${string}`,
@@ -117,7 +116,6 @@ export class UniswapV3ResolverService {
   ): Promise<[number, string, number | null]> {
     try {
       const { exists, poolAddress } = await this.checkV3Pool(
-        client,
         chainId,
         tokenA,
         tokenB,
@@ -130,16 +128,24 @@ export class UniswapV3ResolverService {
   
       // Read token0/token1 from pool
       const [token0, token1] = await Promise.all([
-        client.readContract({
-          address: poolAddress,
-          abi: V3_POOL_ABI,
-          functionName: 'token0',
-        }) as Promise<`0x${string}`>,
-        client.readContract({
-          address: poolAddress,
-          abi: V3_POOL_ABI,
-          functionName: 'token1',
-        }) as Promise<`0x${string}`>,
+        this.rpcClientService.execute(
+          chainId as ChainId,
+          (client) =>
+            client.readContract({
+              address: poolAddress,
+              abi: V3_POOL_ABI,
+              functionName: 'token0',
+            }) as Promise<`0x${string}`>,
+        ),
+        this.rpcClientService.execute(
+          chainId as ChainId,
+          (client) =>
+            client.readContract({
+              address: poolAddress,
+              abi: V3_POOL_ABI,
+              functionName: 'token1',
+            }) as Promise<`0x${string}`>,
+        ),
       ]);
   
       // Minimal ERC20 ABI
@@ -149,18 +155,26 @@ export class UniswapV3ResolverService {
   
       // Read balances of token0/token1 held by pool
       const [balance0Raw, balance1Raw] = await Promise.all([
-        client.readContract({
-          address: token0,
-          abi: ERC20_ABI,
-          functionName: 'balanceOf',
-          args: [poolAddress],
-        }) as Promise<bigint>,
-        client.readContract({
-          address: token1,
-          abi: ERC20_ABI,
-          functionName: 'balanceOf',
-          args: [poolAddress],
-        }) as Promise<bigint>,
+        this.rpcClientService.execute(
+          chainId as ChainId,
+          (client) =>
+            client.readContract({
+              address: token0,
+              abi: ERC20_ABI,
+              functionName: 'balanceOf',
+              args: [poolAddress],
+            }) as Promise<bigint>,
+        ),
+        this.rpcClientService.execute(
+          chainId as ChainId,
+          (client) =>
+            client.readContract({
+              address: token1,
+              abi: ERC20_ABI,
+              functionName: 'balanceOf',
+              args: [poolAddress],
+            }) as Promise<bigint>,
+        ),
       ]);
   
       // Resolve decimals for token0/token1 using provided decimals for tokenA/tokenB
@@ -180,11 +194,15 @@ export class UniswapV3ResolverService {
       const amount1 = Number(ethers.formatUnits(balance1Raw, decimals1));
   
       // Read slot0 to get tick
-      const slot0 = await client.readContract({
-        address: poolAddress,
-        abi: V3_POOL_ABI,
-        functionName: 'slot0',
-      });
+      const slot0 = await this.rpcClientService.execute(
+        chainId as ChainId,
+        (client) =>
+          client.readContract({
+            address: poolAddress,
+            abi: V3_POOL_ABI,
+            functionName: 'slot0',
+          }),
+      );
   
       // slot0: [sqrtPriceX96, tick, ...]
       const tick = Number(slot0[1]);
@@ -271,7 +289,6 @@ export class UniswapV3ResolverService {
    * Tries all fee tiers and returns the one with highest liquidity
    */
   async findBestV3Pool(
-    client: PublicClient,
     chainId: number,
     tokenA: `0x${string}`,
     tokenB: `0x${string}`,
@@ -292,7 +309,6 @@ export class UniswapV3ResolverService {
 
     for (const fee of UNISWAP_V3_FEES) {
       const [liquidity, poolAddress, calculatedTokenBPriceUSD] = await this.calculateV3LiquidityUSD(
-        client,
         chainId,
         tokenA,
         tokenB,
@@ -331,7 +347,6 @@ export class UniswapV3ResolverService {
    * Similar to findV2Path but for V3 pools
    */
   async findV3Path(
-    client: PublicClient,
     chainId: number,
     depositToken: `0x${string}`,
     targetToken: `0x${string}`,
@@ -342,7 +357,6 @@ export class UniswapV3ResolverService {
   ): Promise<V3PathInfo> {
     // Try direct path first
     const directPool = await this.findBestV3Pool(
-      client,
       chainId,
       depositToken,
       targetToken,
@@ -366,7 +380,6 @@ export class UniswapV3ResolverService {
 
     // Find best pool for depositToken -> WETH
     const depositToWethPool = await this.findBestV3Pool(
-      client,
       chainId,
       depositToken,
       WETH,
@@ -378,7 +391,6 @@ export class UniswapV3ResolverService {
 
     // Find best pool for WETH -> targetToken
     const wethToTargetPool = await this.findBestV3Pool(
-      client,
       chainId,
       WETH,
       targetToken,

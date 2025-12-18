@@ -22,11 +22,16 @@ import {
   EtfVolume,
   EtfVolumeSchema,
 } from '../../models/etf-volume.schema';
+import {
+  EtfPriceChart,
+  EtfPriceChartSchema,
+} from '../../models/etf-price-chart.schema';
 import { Web3Service } from '../../services/web3.service';
 import { VaultUtilsService } from '../../services/vault-utils.service';
 import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
 import { EtfVolumeService } from '../../services/etf-volume.service';
-import { RpcRateLimitModule } from '../../services/rpc-rate-limit/rpc-rate-limit.module';
+import { EtfPriceChartService } from '../../services/etf-price-chart.service';
+import { RpcClientModule } from '../../services/rpc-client/rpc-client.module';
 import { EventProcessingJob } from './event-processing.job';
 import { ChainlinkSyncJob } from './chainlink-sync.job';
 import { RewardDistributionJob } from './reward-distribution.job';
@@ -34,7 +39,7 @@ import { VolumeSyncJob } from './volume-sync.job';
 
 @Module({
   imports: [
-    RpcRateLimitModule,
+    RpcClientModule,
     MongooseModule.forFeature([
       { name: Event.name, schema: EventSchema },
       { name: ObserveEvents.name, schema: ObserveEventsSchema },
@@ -43,6 +48,7 @@ import { VolumeSyncJob } from './volume-sync.job';
       { name: ChainlinkDataFeed.name, schema: ChainlinkDataFeedSchema },
       { name: LeaderBoardRewards.name, schema: LeaderBoardRewardsSchema },
       { name: EtfVolume.name, schema: EtfVolumeSchema },
+      { name: EtfPriceChart.name, schema: EtfPriceChartSchema },
     ]),
   ],
   providers: [
@@ -50,6 +56,7 @@ import { VolumeSyncJob } from './volume-sync.job';
     VaultUtilsService,
     WalletHoldingUtilsService,
     EtfVolumeService,
+    EtfPriceChartService,
     EventProcessingJob,
     ChainlinkSyncJob,
     RewardDistributionJob,

@@ -37,6 +37,13 @@ export class RpcRotationService {
       maxDelay: 300000,
     };
 
+    // Log des RPCs chargés pour vérification
+    for (const [chainId, urls] of Object.entries(this.rpcUrls)) {
+      this.logger.log(
+        `Loaded ${urls.length} RPC URL(s) for chain ${chainId}: ${urls.join(', ')}`,
+      );
+    }
+
     this.initializeHealthStates();
   }
 
@@ -86,14 +93,14 @@ export class RpcRotationService {
     return true;
   }
 
-  getBestRpc(chainId: ChainId): string | null {
+  getBestRpc(chainId: ChainId, excludeUrl?: string): string | null {
     const urls = this.rpcUrls[chainId];
     if (!urls || urls.length === 0) {
       this.logger.warn(`No RPC URLs configured for chain ${chainId}`);
       return null;
     }
 
-    const healthyRpc = urls
+    const healthyRpc = urls.filter((url) => excludeUrl ? url !== excludeUrl : true)
       .map((url) => ({
         url,
         state: this.healthStates.get(this.getHealthKey(chainId, url)),
@@ -117,6 +124,7 @@ export class RpcRotationService {
         .filter(({ state }) => state !== undefined);
 
       if (fallbackRpc.length === 0) {
+        this.logger.debug(`Using first available RPC for chain ${chainId}: ${urls[0]}`);
         return urls[0];
       }
 
@@ -126,7 +134,11 @@ export class RpcRotationService {
         return aLastUsed - bLastUsed;
       });
 
-      return fallbackRpc[0].url;
+      const selectedUrl = fallbackRpc[0].url;
+      this.logger.debug(
+        `No healthy RPC available for chain ${chainId}, using fallback: ${selectedUrl}`,
+      );
+      return selectedUrl;
     }
 
     healthyRpc.sort((a, b) => {
@@ -135,7 +147,11 @@ export class RpcRotationService {
       return aLastUsed - bLastUsed;
     });
 
-    return healthyRpc[0].url;
+    const selectedUrl = healthyRpc[0].url;
+    // this.logger.debug(
+    //   `Selected best RPC for chain ${chainId}: ${selectedUrl} (${healthyRpc.length} healthy RPC(s) available)`,
+    // );
+    return selectedUrl;
   }
 
   recordSuccess(url: string, chainId: ChainId): void {

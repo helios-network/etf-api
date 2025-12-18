@@ -14,7 +14,8 @@ import { Web3Service } from '../../services/web3.service';
 import { VaultUtilsService } from '../../services/vault-utils.service';
 import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
 import { EtfVolumeService } from '../../services/etf-volume.service';
-import { RpcRateLimitService } from '../../services/rpc-rate-limit/rpc-rate-limit.service';
+import { EtfPriceChartService } from '../../services/etf-price-chart.service';
+import { RpcClientService } from '../../services/rpc-client/rpc-client.service';
 import { Event, EventDocument } from '../../models/event.schema';
 import {
   ObserveEvents,
@@ -33,7 +34,10 @@ import { normalizeEthAddress } from '../../common/utils/eip55';
 
 // Constants following the Go code pattern
 const ETH_BLOCK_CONFIRMATION_DELAY = 4n; // Minimum number of confirmations for a block to be considered valid
-const DEFAULT_BLOCKS_TO_SEARCH = 2000n; // Maximum block range for event query
+const DEFAULT_BLOCKS_TO_SEARCH: Record<ChainId, bigint> = {
+  [ChainId.MAINNET]: 900n,
+  [ChainId.ARBITRUM]: 2000n,
+}; // Maximum block range for event query
 
 // Average block time in milliseconds (Ethereum mainnet ~12s, Arbitrum ~0.25s)
 const AVERAGE_BLOCK_TIME_MS: Record<ChainId, bigint> = {
@@ -122,7 +126,8 @@ export class EventProcessingJob {
     private readonly vaultUtils: VaultUtilsService,
     private readonly walletHoldingUtils: WalletHoldingUtilsService,
     private readonly etfVolumeService: EtfVolumeService,
-    private readonly rpcRateLimitService: RpcRateLimitService,
+    private readonly etfPriceChartService: EtfPriceChartService,
+    private readonly rpcClientService: RpcClientService,
   ) {
     this.logger.log('EventProcessingJob constructor called');
   }
@@ -134,10 +139,9 @@ export class EventProcessingJob {
     shares: bigint,
     walletHolding: WalletHoldingData,
     etf: ETFDocument,
-    client: PublicClient,
   ): Promise<void> {
     // Update ETF TVL and share price
-    await this.updateETFPortfolio(etf.chain, client, new Set([etf.vault]));
+    await this.updateETFPortfolio(etf.chain, new Set([etf.vault]));
 
     // Update wallet TVL
     const calculatedTVL = await this.walletHoldingUtils.calculateWalletTVL(
@@ -172,6 +176,14 @@ export class EventProcessingJob {
         Date.now(),
       );
       etf.dailyVolumeUSD = dailyVolumeUSD;
+
+      // Add price chart entry
+      await this.etfPriceChartService.addPriceChartEntry(
+        etf.vault,
+        depositAmountUSD,
+        etf.sharePrice,
+        Date.now(),
+      );
     }
 
     // Update ETF total supply
@@ -190,10 +202,9 @@ export class EventProcessingJob {
     shares: bigint,
     walletHolding: WalletHoldingData,
     etf: ETFDocument,
-    client: PublicClient,
   ): Promise<void> {
     // Update ETF TVL and share price
-    await this.updateETFPortfolio(etf.chain, client, new Set([etf.vault]));
+    await this.updateETFPortfolio(etf.chain, new Set([etf.vault]));
 
     // Update wallet TVL
     const calculatedTVL = await this.walletHoldingUtils.calculateWalletTVL(
@@ -228,6 +239,14 @@ export class EventProcessingJob {
         Date.now(),
       );
       etf.dailyVolumeUSD = dailyVolumeUSD;
+
+      // Add price chart entry
+      await this.etfPriceChartService.addPriceChartEntry(
+        etf.vault,
+        depositAmountUSD,
+        etf.sharePrice,
+        Date.now(),
+      );
     }
 
     // Update ETF total supply
@@ -327,7 +346,6 @@ export class EventProcessingJob {
   private async processDepositEvent(
     log: EventLog,
     chainId: ChainId,
-    client: PublicClient,
     holdingsMap: Map<string, WalletHoldingData>,
   ): Promise<boolean> {
     const { vault, user, sharesOut } = log.args;
@@ -385,7 +403,7 @@ export class EventProcessingJob {
     );
     
     // Apply middlewares
-    await this.middlewareAfterDeposit(sharesOut, walletHolding, etf, client);
+    await this.middlewareAfterDeposit(sharesOut, walletHolding, etf);
     return true;
   }
 
@@ -395,7 +413,6 @@ export class EventProcessingJob {
   private async processRedeemEvent(
     log: EventLog,
     chainId: ChainId,
-    client: PublicClient,
     holdingsMap: Map<string, WalletHoldingData>,
   ): Promise<boolean> {
     const { vault, user, sharesIn } = log.args;
@@ -458,7 +475,7 @@ export class EventProcessingJob {
     );
     
     // Apply middlewares
-    await this.middlewareAfterRedeem(sharesIn, walletHolding, etf, client);
+    await this.middlewareAfterRedeem(sharesIn, walletHolding, etf);
     return true;
   }
 
@@ -468,7 +485,6 @@ export class EventProcessingJob {
   private async processETFCreatedEvent(
     log: EventLog,
     chainId: ChainId,
-    client: PublicClient,
     holdingsMap: Map<string, WalletHoldingData>,
   ): Promise<boolean> {
     const {
@@ -490,9 +506,9 @@ export class EventProcessingJob {
     if (log.transactionHash) {
       try {
         const transactionHash = log.transactionHash;
-        const tx = await this.rpcRateLimitService.executeWithRateLimit(
+        const tx = await this.rpcClientService.execute(
           chainId,
-          () => client.getTransaction({ hash: transactionHash }),
+          (client) => client.getTransaction({ hash: transactionHash }),
         );
         if (tx.from) {
           const walletHolding = this.getOrCreateWalletHolding(
@@ -511,7 +527,6 @@ export class EventProcessingJob {
     try {
       // Fetch vault configuration from blockchain
       const vaultConfig = await this.vaultUtils.fetchVaultConfig(
-        client,
         vault,
         shareToken,
         chainId,
@@ -556,6 +571,9 @@ export class EventProcessingJob {
         shareDecimals: vaultConfig.shareDecimals,
       });
 
+      // Initialize price chart for the new ETF
+      await this.etfPriceChartService.initializePriceChart(normalizedVault);
+
       this.logger.log(`ETF created: ${normalizedVault} (${name}/${symbol})`);
     } catch (error) {
       this.logger.error(`Error fetching vault config for ${normalizedVault}`);
@@ -574,7 +592,6 @@ export class EventProcessingJob {
   private async processRebalanceEvent(
     log: EventLog,
     chainId: ChainId,
-    client: PublicClient,
     holdingsMap: Map<string, WalletHoldingData>,
   ): Promise<boolean> {
     const { vault } = log.args;
@@ -624,7 +641,6 @@ export class EventProcessingJob {
   private async processParamsUpdatedEvent(
     log: EventLog,
     chainId: ChainId,
-    client: PublicClient,
   ): Promise<boolean> {
     const { vault } = log.args;
 
@@ -679,7 +695,6 @@ export class EventProcessingJob {
    */
   private async getFactoryEvents(
     chainId: ChainId,
-    client: PublicClient,
     contractAddress: `0x${string}`,
     fromBlock: bigint,
     toBlock: bigint,
@@ -690,9 +705,9 @@ export class EventProcessingJob {
     const noncesFound: bigint[] = [];
 
     // 1. Deposit events (most frequent)
-    const depositEvents = await this.rpcRateLimitService.executeWithRateLimit(
+    const depositEvents = await this.rpcClientService.execute(
       chainId,
-      () =>
+      (client) =>
         client.getLogs({
           address: contractAddress,
           fromBlock,
@@ -717,9 +732,9 @@ export class EventProcessingJob {
     }
 
     // 2. Redeem events
-    const redeemEvents = await this.rpcRateLimitService.executeWithRateLimit(
+    const redeemEvents = await this.rpcClientService.execute(
       chainId,
-      () =>
+      (client) =>
         client.getLogs({
           address: contractAddress,
           fromBlock,
@@ -743,9 +758,9 @@ export class EventProcessingJob {
       return newEvents;
     }
     // 3. ETFCreated events
-    const etfCreatedEvents = await this.rpcRateLimitService.executeWithRateLimit(
+    const etfCreatedEvents = await this.rpcClientService.execute(
       chainId,
-      () =>
+      (client) =>
         client.getLogs({
           address: contractAddress,
           fromBlock,
@@ -770,9 +785,9 @@ export class EventProcessingJob {
     }
 
     // 4. Rebalance events
-    const rebalanceEvents = await this.rpcRateLimitService.executeWithRateLimit(
+    const rebalanceEvents = await this.rpcClientService.execute(
       chainId,
-      () =>
+      (client) =>
         client.getLogs({
           address: contractAddress,
           fromBlock,
@@ -797,9 +812,9 @@ export class EventProcessingJob {
     }
 
     // 5. ParamsUpdated events
-    const paramsUpdatedEvents = await this.rpcRateLimitService.executeWithRateLimit(
+    const paramsUpdatedEvents = await this.rpcClientService.execute(
       chainId,
-      () =>
+      (client) =>
         client.getLogs({
           address: contractAddress,
           fromBlock,
@@ -1010,7 +1025,6 @@ export class EventProcessingJob {
   private async processEvents(
     events: EventLog[],
     chainId: ChainId,
-    client: PublicClient,
     holdingsMap: Map<string, WalletHoldingData>,
     existingWalletSet: Set<string>,
     latestBlock: bigint,
@@ -1022,7 +1036,7 @@ export class EventProcessingJob {
         // Process the event
         switch (log.eventName) {
           case 'Deposit':
-            eventProcessed = await this.processDepositEvent(log, chainId, client, holdingsMap);
+            eventProcessed = await this.processDepositEvent(log, chainId, holdingsMap);
             // Save wallet holding if it was modified
             if (eventProcessed) {
               const depositUser = log.args.user;
@@ -1035,7 +1049,7 @@ export class EventProcessingJob {
             }
             break;
           case 'Redeem':
-            eventProcessed = await this.processRedeemEvent(log, chainId, client, holdingsMap);
+            eventProcessed = await this.processRedeemEvent(log, chainId, holdingsMap);
             // Save wallet holding if it was modified
             if (eventProcessed) {
               const redeemUser = log.args.user;
@@ -1048,14 +1062,14 @@ export class EventProcessingJob {
             }
             break;
           case 'ETFCreated':
-            eventProcessed = await this.processETFCreatedEvent(log, chainId, client, holdingsMap);
+            eventProcessed = await this.processETFCreatedEvent(log, chainId, holdingsMap);
             // Save wallet holdings that were modified (if any)
             if (eventProcessed && log.transactionHash) {
               try {
                 const transactionHash = log.transactionHash; // Capture for closure
-                const tx = await this.rpcRateLimitService.executeWithRateLimit(
+                const tx = await this.rpcClientService.execute(
                   chainId,
-                  () => client.getTransaction({ hash: transactionHash }),
+                  (client) => client.getTransaction({ hash: transactionHash }),
                 );
                 if (tx.from) {
                   const walletHolding = holdingsMap.get(tx.from);
@@ -1069,7 +1083,7 @@ export class EventProcessingJob {
             }
             break;
           case 'Rebalance':
-            eventProcessed = await this.processRebalanceEvent(log, chainId, client, holdingsMap);
+            eventProcessed = await this.processRebalanceEvent(log, chainId, holdingsMap);
             // Save all wallet holdings that were modified
             if (eventProcessed) {
               const { vault } = log.args;
@@ -1096,7 +1110,7 @@ export class EventProcessingJob {
             }
             break;
           case 'ParamsUpdated':
-            eventProcessed = await this.processParamsUpdatedEvent(log, chainId, client);
+            eventProcessed = await this.processParamsUpdatedEvent(log, chainId);
             break;
           default:
             this.logger.warn(`Unknown event type: ${log.eventName}`);
@@ -1138,7 +1152,6 @@ export class EventProcessingJob {
    */
   private async updateETFPortfolio(
     chainId: ChainId,
-    client: PublicClient,
     vaultAddresses: Set<string>,
   ): Promise<void> {
     if (vaultAddresses.size === 0) return;
@@ -1166,7 +1179,6 @@ export class EventProcessingJob {
         }
 
         const portfolio = await this.vaultUtils.fetchVaultPortfolio(
-          client,
           etf.vault as `0x${string}`,
           chainId,
           etf.shareDecimals,
@@ -1214,7 +1226,6 @@ export class EventProcessingJob {
    */
   private async syncToTargetHeight(
     chainId: ChainId,
-    client: PublicClient,
     lastObservedEthHeight: bigint,
     targetHeight: bigint,
     latestHeight: bigint,
@@ -1235,9 +1246,9 @@ export class EventProcessingJob {
     // Get latest event nonce from contract with rate limiting
     let latestEventNonce: bigint;
     try {
-      latestEventNonce = (await this.rpcRateLimitService.executeWithRateLimit(
+      latestEventNonce = (await this.rpcClientService.execute(
         chainId,
-        () =>
+        (client) =>
           client.readContract({
             address: ETF_CONTRACT_ADDRS[chainId] as `0x${string}`,
             abi: parseAbi([
@@ -1274,12 +1285,13 @@ export class EventProcessingJob {
 
         const nbBlocksToRewind = twoMinutesMs / blockTimeOnTheChain;
 
-        this.logger.debug(`Rewinding last observed height by ${nbBlocksToRewind} blocks on chain ${chainId}`);
+        this.logger.debug(`Rewinding last observed height by ${nbBlocksToRewind} blocks on chain ${chainId} from ${lastObservedEthHeight} to ${lastObservedEthHeight > nbBlocksToRewind ? lastObservedEthHeight - nbBlocksToRewind : 0n}`);
         // rewind the last observed height
         lastObservedEthHeight =
           lastObservedEthHeight > nbBlocksToRewind
             ? lastObservedEthHeight - nbBlocksToRewind
             : 0n;
+        
       }
     }
 
@@ -1298,7 +1310,6 @@ export class EventProcessingJob {
     try {
       events = await this.getFactoryEvents(
         chainId,
-        client,
         contractAddress,
         lastObservedEthHeight,
         targetHeight,
@@ -1306,6 +1317,7 @@ export class EventProcessingJob {
         noncesResearched,
       );
     } catch (error) {
+      console.log(error);
       this.logger.error(`Failed to get events on chain ${chainId}`);
       return { lastObservedEthHeight, error: new Error('Failed to get events') };
     }
@@ -1410,7 +1422,6 @@ export class EventProcessingJob {
     await this.processEvents(
       newEvents,
       chainId,
-      client,
       holdingsMap,
       existingWalletSet,
       latestHeight,
@@ -1425,7 +1436,6 @@ export class EventProcessingJob {
    */
   private async observeEvents(
     chainId: ChainId,
-    client: PublicClient,
   ): Promise<void> {
     if (DEFAULT_START_BLOCKS[chainId] == 0n) return;
 
@@ -1458,9 +1468,9 @@ export class EventProcessingJob {
     // Get latest block number with rate limiting
     let latestHeight: bigint;
     try {
-      latestHeight = await this.rpcRateLimitService.executeWithRateLimit(
+      latestHeight = await this.rpcClientService.execute(
         chainId,
-        () => client.getBlockNumber(),
+        (client) => client.getBlockNumber(),
       );
     } catch (error) {
       this.logger.error(`Failed to get latest height on chain ${chainId}`);
@@ -1493,7 +1503,7 @@ export class EventProcessingJob {
     }
 
     // Sync in chunks following Go code pattern
-    const defaultBlocksToSearch = DEFAULT_BLOCKS_TO_SEARCH;
+    const defaultBlocksToSearch = DEFAULT_BLOCKS_TO_SEARCH[chainId];
     let targetHeightForSync = targetHeight;
 
     // On first launch, sync completely without iteration limit
@@ -1512,7 +1522,6 @@ export class EventProcessingJob {
 
         const result = await this.syncToTargetHeight(
           chainId,
-          client,
           lastObservedEthHeight,
           targetHeightForSync,
           latestHeight,
@@ -1570,7 +1579,6 @@ export class EventProcessingJob {
 
         const result = await this.syncToTargetHeight(
           chainId,
-          client,
           lastObservedEthHeight,
           targetHeightForSync,
           latestHeight,
@@ -1704,9 +1712,9 @@ export class EventProcessingJob {
           if (!observeProgress) {
             continue;
           }
-          const lastEventNonce = (await this.rpcRateLimitService.executeWithRateLimit(
+          const lastEventNonce = (await this.rpcClientService.execute(
             chainId,
-            () =>
+            (client) =>
               client.readContract({
                 address: ETF_CONTRACT_ADDRS[chainId] as `0x${string}`,
                 abi: parseAbi([
@@ -1718,9 +1726,9 @@ export class EventProcessingJob {
 
           const lastObservedNonce = BigInt(observeProgress.lastNonce ?? '0');
           if (lastEventNonce <= lastObservedNonce) {
-            const latestObservedHeight = await this.rpcRateLimitService.executeWithRateLimit(
+            const latestObservedHeight = await this.rpcClientService.execute(
               chainId,
-              () => client.getBlockNumber(),
+              (client) => client.getBlockNumber(),
             );
             await this.observeEventsModel.findOneAndUpdate(
               { chain: Number(chainId) },
@@ -1738,8 +1746,7 @@ export class EventProcessingJob {
 
       await Promise.all(
         [ChainId.MAINNET, ChainId.ARBITRUM].map(async (chainId) => {
-          const client = this.web3Service.getPublicClient(chainId);
-          await this.observeEvents(chainId, client);
+          await this.observeEvents(chainId);
         }),
       );
     } catch (error) {

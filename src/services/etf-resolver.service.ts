@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { type PublicClient, erc20Abi, encodeAbiParameters } from 'viem';
+import { erc20Abi, encodeAbiParameters } from 'viem';
 import { ASSETS_ADDRS, MIN_LIQUIDITY_USD } from '../constants';
 import { ChainlinkResolverService } from './chainlink-resolver.service';
 import { UniswapV2ResolverService } from './uniswap-v2-resolver.service';
 import { UniswapV3ResolverService } from './uniswap-v3-resolver.service';
-import { RpcRateLimitService } from './rpc-rate-limit/rpc-rate-limit.service';
+import { RpcClientService } from './rpc-client/rpc-client.service';
 import { ChainId } from '../config/web3';
 import {
   TokenMetadata,
@@ -22,36 +22,31 @@ export class EtfResolverService {
     private readonly chainlinkResolver: ChainlinkResolverService,
     private readonly uniswapV2Resolver: UniswapV2ResolverService,
     private readonly uniswapV3Resolver: UniswapV3ResolverService,
-    private readonly rpcRateLimitService: RpcRateLimitService,
+    private readonly rpcClientService: RpcClientService,
   ) {}
 
   /**
    * Get token metadata (symbol, decimals) from blockchain
    */
   async getTokenMetadata(
-    client: PublicClient,
     tokenAddress: `0x${string}`,
     chainId: ChainId,
   ): Promise<TokenMetadata> {
     try {
       const [symbol, decimals] = await Promise.all([
-        this.rpcRateLimitService.executeWithRateLimit(
-          chainId,
-          () =>
-            client.readContract({
-              address: tokenAddress,
-              abi: erc20Abi,
-              functionName: 'symbol',
-            }),
+        this.rpcClientService.execute(chainId, (client) =>
+          client.readContract({
+            address: tokenAddress,
+            abi: erc20Abi,
+            functionName: 'symbol',
+          }),
         ),
-        this.rpcRateLimitService.executeWithRateLimit(
-          chainId,
-          () =>
-            client.readContract({
-              address: tokenAddress,
-              abi: erc20Abi,
-              functionName: 'decimals',
-            }),
+        this.rpcClientService.execute(chainId, (client) =>
+          client.readContract({
+            address: tokenAddress,
+            abi: erc20Abi,
+            functionName: 'decimals',
+          }),
         ),
       ]);
 
@@ -69,7 +64,6 @@ export class EtfResolverService {
    * Get price from Chainlink feed
    */
   async getChainlinkPrice(
-    client: PublicClient,
     feedAddress: `0x${string}`,
     decimals: number,
     chainId: ChainId,
@@ -91,14 +85,12 @@ export class EtfResolverService {
         },
       ] as const;
 
-      const result = await this.rpcRateLimitService.executeWithRateLimit(
-        chainId,
-        () =>
-          client.readContract({
-            address: feedAddress,
-            abi: priceFeedAbi,
-            functionName: 'latestRoundData',
-          }),
+      const result = await this.rpcClientService.execute(chainId, (client) =>
+        client.readContract({
+          address: feedAddress,
+          abi: priceFeedAbi,
+          functionName: 'latestRoundData',
+        }),
       );
 
       const answer = result[1] as bigint;
@@ -125,7 +117,6 @@ export class EtfResolverService {
    * Returns an array of modes that are valid for this token
    */
   async findPossibleModes(
-    client: PublicClient,
     depositToken: `0x${string}`,
     targetToken: `0x${string}`,
     chainId: number,
@@ -138,7 +129,6 @@ export class EtfResolverService {
     const usdcFeed = await this.chainlinkResolver.resolveUSDCFeed(chainId);
     const usdcPrice = usdcFeed
       ? await this.getChainlinkPrice(
-          client,
           usdcFeed.proxyAddress as `0x${string}`,
           usdcFeed.decimals,
           chainId as ChainId,
@@ -164,7 +154,6 @@ export class EtfResolverService {
     let targetPrice: number | null = null;
     if (hasFeed) {
       targetPrice = await this.getChainlinkPrice(
-        client,
         targetFeed!.proxyAddress as `0x${string}`,
         targetFeed!.decimals,
         chainId as ChainId,
@@ -174,7 +163,6 @@ export class EtfResolverService {
     // Check Mode 1: V2 + Chainlink Feed
     if (hasFeed && targetPrice) {
       const v2Path = await this.uniswapV2Resolver.findV2Path(
-        client,
         chainId,
         depositToken,
         targetToken,
@@ -191,7 +179,6 @@ export class EtfResolverService {
     // Check Mode 2: V3 + Chainlink Feed
     if (hasFeed && targetPrice) {
       const v3Path = await this.uniswapV3Resolver.findV3Path(
-        client,
         chainId,
         depositToken,
         targetToken,
@@ -207,7 +194,6 @@ export class EtfResolverService {
 
     // Check Mode 3: V2 + V2 (DEX-only)
     const v2Path = await this.uniswapV2Resolver.findV2Path(
-      client,
       chainId,
       depositToken,
       targetToken,
@@ -222,7 +208,6 @@ export class EtfResolverService {
 
     // Check Mode 4: V3 + V3 (last resort)
     const v3Path = await this.uniswapV3Resolver.findV3Path(
-      client,
       chainId,
       depositToken,
       targetToken,
@@ -242,7 +227,6 @@ export class EtfResolverService {
    * Resolve token with a specific pricing mode
    */
   async resolveTokenWithMode(
-    client: PublicClient,
     depositToken: `0x${string}`,
     targetToken: `0x${string}`,
     chainId: number,
@@ -254,7 +238,6 @@ export class EtfResolverService {
     const usdcFeed = await this.chainlinkResolver.resolveUSDCFeed(chainId);
     const usdcPrice = usdcFeed
       ? await this.getChainlinkPrice(
-          client,
           usdcFeed.proxyAddress as `0x${string}`,
           usdcFeed.decimals,
           chainId as ChainId,
@@ -278,7 +261,6 @@ export class EtfResolverService {
 
     const targetPrice = targetFeed
       ? await this.getChainlinkPrice(
-          client,
           targetFeed.proxyAddress as `0x${string}`,
           targetFeed.decimals,
           chainId as ChainId,
@@ -292,7 +274,6 @@ export class EtfResolverService {
           throw new Error('V2_PLUS_FEED requires Chainlink feed');
         }
         const v2PathFeed = await this.uniswapV2Resolver.findV2Path(
-          client,
           chainId,
           depositToken,
           targetToken,
@@ -327,7 +308,6 @@ export class EtfResolverService {
           throw new Error('V3_PLUS_FEED requires Chainlink feed');
         }
         const v3PathFeed = await this.uniswapV3Resolver.findV3Path(
-          client,
           chainId,
           depositToken,
           targetToken,
@@ -349,7 +329,6 @@ export class EtfResolverService {
 
       case 'V2_PLUS_V2':
         const v2Path = await this.uniswapV2Resolver.findV2Path(
-          client,
           chainId,
           depositToken,
           targetToken,
@@ -381,7 +360,6 @@ export class EtfResolverService {
 
       case 'V3_PLUS_V3':
         const v3Path = await this.uniswapV3Resolver.findV3Path(
-          client,
           chainId,
           depositToken,
           targetToken,

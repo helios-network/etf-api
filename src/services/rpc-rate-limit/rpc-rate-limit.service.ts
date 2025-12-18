@@ -1,11 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { PublicClient } from 'viem';
 import { RedisService } from '../../database/redis/redis.service';
 import { ChainId } from '../../config/web3';
 import {
   RpcConfig,
   RateLimitCheckResult,
 } from './interfaces';
+import { RpcRotationService } from './rpc-rotation.service';
 
 /**
  * Service de rate limiting pour les appels RPC
@@ -25,6 +27,7 @@ export class RpcRateLimitService {
   constructor(
     private readonly redisService: RedisService,
     private readonly configService: ConfigService,
+    @Optional() @Inject(RpcRotationService) private readonly rpcRotationService?: RpcRotationService,
   ) {}
 
   /**
@@ -166,38 +169,109 @@ export class RpcRateLimitService {
   }
 
   /**
-   * Exécute une fonction avec rate limiting
-   * Middleware réutilisable pour n'importe quel appel RPC
-   * 
-   * @param chainId La chaîne pour laquelle appliquer le rate limit
-   * @param fn La fonction à exécuter (généralement un appel RPC)
-   * @returns Le résultat de la fonction
+   * Exécute une fonction avec rate limiting (sans client - compatibilité)
    */
   async executeWithRateLimit<T>(
     chainId: ChainId,
     fn: () => Promise<T>,
+  ): Promise<T>;
+  /**
+   * Exécute une fonction avec rate limiting avec rotation de RPC
+   * 
+   * @param chainId La chaîne pour laquelle appliquer le rate limit
+   * @param fn La fonction à exécuter qui accepte un client optionnel
+   * @param client Le client à utiliser. Si un rate limit global est détecté,
+   *               on essaiera de créer un nouveau client avec un autre RPC pour la rotation
+   * @param createClientWithRpc Fonction pour créer un nouveau client avec un RPC spécifique
+   * @returns Le résultat de la fonction
+   */
+  async executeWithRateLimit<T>(
+    chainId: ChainId,
+    fn: (client?: PublicClient) => Promise<T>,
+    client: PublicClient,
+    createClientWithRpc: (rpcUrl: string) => PublicClient,
+  ): Promise<T>;
+  /**
+   * Implémentation de executeWithRateLimit
+   */
+  async executeWithRateLimit<T>(
+    chainId: ChainId,
+    fn: (() => Promise<T>) | ((client?: PublicClient) => Promise<T>),
+    client?: PublicClient,
+    createClientWithRpc?: (rpcUrl: string) => PublicClient,
   ): Promise<T> {
     // Vérifier le rate limit
     const result = await this.checkRateLimit(chainId);
 
+    let clientToUse = client;
+    let hasRotated = false;
+
     if (!result.allowed && result.waitTime) {
-      // Attendre jusqu'à ce que la limite soit disponible
-      this.logger.debug(
-        `Rate limit reached for chain ${chainId}, waiting ${result.waitTime}ms`,
-      );
-      await this.sleep(result.waitTime);
+      // Rate limit global détecté (via Redis) - essayer de changer de RPC si possible
+      if (this.rpcRotationService && client && createClientWithRpc) {
+        const currentRpc = (client.transport as any).url;//this.rpcRotationService.getBestRpc(chainId);
+        const allRpcUrls = this.rpcRotationService.getRpcUrls(chainId);
+        console.log('currentRpc', currentRpc);
+        if (currentRpc && allRpcUrls.length > 1) {
+          // Trouver un autre RPC disponible
+          const alternativeRpc = allRpcUrls.find(
+            (url) => url !== currentRpc && this.rpcRotationService!.isRpcHealthy(url, chainId),
+          );
+          
+          if (alternativeRpc) {
+            // Créer un nouveau client avec l'autre RPC
+            client.transport.url = alternativeRpc;
+            // clientToUse = createClientWithRpc(alternativeRpc);
+            hasRotated = true;
+            
+            // Reset le rate limit dans Redis et en mémoire
+            await this.resetRateLimit(chainId);
+            
+            this.logger.log(
+              `Global rate limit reached for chain ${chainId}. Rotating RPC: ${currentRpc} -> ${alternativeRpc}. Rate limit counter reset.`,
+            );
+          } else {
+            this.logger.debug(
+              `Global rate limit reached for chain ${chainId}, but no alternative healthy RPC available. Waiting ${result.waitTime}ms`,
+            );
+            await this.sleep(result.waitTime);
+          }
+        } else {
+          this.logger.debug(
+            `Global rate limit reached for chain ${chainId}, but only one RPC available. Waiting ${result.waitTime}ms`,
+          );
+          await this.sleep(result.waitTime);
+        }
+      } else {
+        // Pas de client fourni ou pas de fonction de création - attendre simplement
+        this.logger.debug(
+          `Global rate limit reached for chain ${chainId}, waiting ${result.waitTime}ms`,
+        );
+        await this.sleep(result.waitTime);
+      }
       
       // Re-vérifier (au cas où d'autres instances auraient utilisé des slots)
-      const recheck = await this.checkRateLimit(chainId);
-      if (!recheck.allowed && recheck.waitTime) {
-        // Attendre encore un peu
-        await this.sleep(recheck.waitTime);
+      if (!hasRotated) {
+        const recheck = await this.checkRateLimit(chainId);
+        if (!recheck.allowed && recheck.waitTime) {
+          // Attendre encore un peu seulement si on n'a pas changé de client
+          await this.sleep(recheck.waitTime);
+        }
       }
     }
 
     try {
       // Exécuter la fonction
-      return await fn();
+      // Si c'est la version avec client, passer le client (original ou alternatif)
+      // Sinon, appeler sans paramètre
+      if (client !== undefined && createClientWithRpc !== undefined) {
+        if (hasRotated) {
+          console.log('clientToUse', (clientToUse as PublicClient)?.transport);
+        }
+        return await (fn as (client?: PublicClient) => Promise<T>)(clientToUse as PublicClient);
+      } else {
+        return await (fn as () => Promise<T>)();
+      }
     } catch (error) {
       // Si c'est une erreur 429, elle sera gérée par le transport wrapper avec retries
       // On laisse simplement remonter l'erreur
@@ -210,5 +284,55 @@ export class RpcRateLimitService {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Reset le rate limit pour une chaîne donnée
+   * Supprime les clés Redis de la fenêtre courante et précédente
+   * Reset aussi le compteur en mémoire
+   */
+  async resetRateLimit(chainId: ChainId): Promise<void> {
+    const config = this.configService.get<RpcConfig>('rpc');
+    if (!config) {
+      return;
+    }
+
+    const rateLimitConfig = config.rateLimits[chainId];
+    if (!rateLimitConfig) {
+      return;
+    }
+
+    try {
+      const now = Date.now();
+      const windowMs = rateLimitConfig.windowMs;
+      const windowStart = Math.floor(now / windowMs) * windowMs;
+      const previousWindowStart = windowStart - windowMs;
+
+      const key = `${this.namespace}${this.keySeparator}${chainId}${this.keySeparator}${windowStart}`;
+      const prevKey = `${this.namespace}${this.keySeparator}${chainId}${this.keySeparator}${previousWindowStart}`;
+
+      const redisClient = this.redisService.getClient();
+      const pipeline = redisClient.pipeline();
+      
+      // Supprimer les clés de la fenêtre courante et précédente
+      pipeline.del(key);
+      pipeline.del(prevKey);
+      
+      await pipeline.exec();
+      
+      this.logger.debug(
+        `Rate limit reset for chain ${chainId}: deleted keys ${key} and ${prevKey}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Error resetting rate limit in Redis for chain ${chainId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+    }
+
+    // Reset aussi le compteur en mémoire
+    const inMemoryKey = `chain_${chainId}`;
+    this.inMemoryCounters.delete(inMemoryKey);
+    
+    this.logger.debug(`Rate limit reset in memory for chain ${chainId}`);
   }
 }

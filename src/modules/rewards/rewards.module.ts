@@ -8,7 +8,7 @@ import {
   LeaderBoardRewardsSchema,
 } from '../../models/leader-board-rewards.schema';
 import { Web3Service } from '../../services/web3.service';
-import { RpcRateLimitModule } from '../../services/rpc-rate-limit/rpc-rate-limit.module';
+import { RpcClientModule } from '../../services/rpc-client/rpc-client.module';
 
 @Module({
   imports: [
@@ -16,7 +16,7 @@ import { RpcRateLimitModule } from '../../services/rpc-rate-limit/rpc-rate-limit
       { name: WalletHolding.name, schema: WalletHoldingSchema },
       { name: LeaderBoardRewards.name, schema: LeaderBoardRewardsSchema },
     ]),
-    RpcRateLimitModule,
+    RpcClientModule,
   ],
   controllers: [RewardsController],
   providers: [RewardsService, Web3Service],

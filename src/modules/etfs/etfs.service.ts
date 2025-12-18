@@ -159,7 +159,7 @@ export class EtfsService {
     // Get deposit token metadata
     let depositTokenMetadata: TokenMetadata;
     try {
-      depositTokenMetadata = await this.etfResolver.getTokenMetadata(client, depositToken, chainId);
+      depositTokenMetadata = await this.etfResolver.getTokenMetadata(depositToken, chainId);
     } catch (error) {
       const errorResponse: VerifyErrorResponse = {
         status: 'ERROR',
@@ -187,7 +187,6 @@ export class EtfsService {
       try {
         // Get target token metadata
         const targetTokenMetadata = await this.etfResolver.getTokenMetadata(
-          client,
           targetToken,
           chainId,
         );
@@ -195,7 +194,6 @@ export class EtfsService {
 
         // Find all possible modes for this token
         const possibleModes = await this.etfResolver.findPossibleModes(
-          client,
           depositToken,
           targetToken,
           chainId,
@@ -220,7 +218,7 @@ export class EtfsService {
       } catch (error) {
         let targetSymbol = component.token;
         try {
-          const metadata = await this.etfResolver.getTokenMetadata(client, targetToken, chainId);
+          const metadata = await this.etfResolver.getTokenMetadata(targetToken, chainId);
           targetSymbol = metadata.symbol;
         } catch {
           // Keep original token address if metadata fetch fails
@@ -286,7 +284,6 @@ export class EtfsService {
 
         // Resolve token with the common mode
         const resolution = await this.etfResolver.resolveTokenWithMode(
-          client,
           depositToken,
           targetToken,
           chainId,
@@ -363,7 +360,6 @@ export class EtfsService {
         validDepositTokens.map(async (token) => {
           try {
             const metadata = await this.etfResolver.getTokenMetadata(
-              client,
               token as `0x${string}`,
               chainId as ChainId,
             );

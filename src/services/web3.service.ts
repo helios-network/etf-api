@@ -10,7 +10,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet, arbitrum } from 'viem/chains';
 import { ChainId } from '../config/web3';
 import { RpcRotationService } from './rpc-rate-limit/rpc-rotation.service';
-import { createRotatingTransport } from './rpc-rate-limit/transport-wrapper';
+import { createRotatingTransport, createTransportWithSpecificRpc } from './rpc-rate-limit/transport-wrapper';
 
 @Injectable()
 export class Web3Service {
@@ -93,5 +93,43 @@ export class Web3Service {
       throw new Error('PRIVATE_KEY not configured');
     }
     return privateKeyToAccount(this.privateKey);
+  }
+
+  /**
+   * Crée un PublicClient avec un RPC spécifique
+   * Utilisé lors de la rotation de RPC quand un rate limit global est détecté
+   */
+  createPublicClientWithRpc(chainId: ChainId, rpcUrl: string): PublicClient {
+    const rpcConfig = this.configService.get<any>('rpc');
+    const retryConfig = rpcConfig?.retry || {
+      maxRetries: 5,
+      baseDelay: 1000,
+      maxDelay: 300000,
+    };
+
+    const chain = chainId === ChainId.MAINNET ? mainnet : arbitrum;
+    return createPublicClient({
+      chain,
+      transport: createTransportWithSpecificRpc(rpcUrl, retryConfig),
+    });
+  }
+
+  /**
+   * Crée un WalletClient avec un RPC spécifique
+   * Utilisé lors de la rotation de RPC quand un rate limit global est détecté
+   */
+  createWalletClientWithRpc(chainId: ChainId, rpcUrl: string): WalletClient {
+    const rpcConfig = this.configService.get<any>('rpc');
+    const retryConfig = rpcConfig?.retry || {
+      maxRetries: 5,
+      baseDelay: 1000,
+      maxDelay: 300000,
+    };
+
+    const chain = chainId === ChainId.MAINNET ? mainnet : arbitrum;
+    return createWalletClient({
+      chain,
+      transport: createTransportWithSpecificRpc(rpcUrl, retryConfig),
+    });
   }
 }

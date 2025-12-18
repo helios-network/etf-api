@@ -16,7 +16,7 @@ import { ChainId } from '../../config/web3';
 import { TRANSACTION_POINTS } from '../../constants/transaction-points';
 import { verifyMessage, erc20Abi } from 'viem';
 import { normalizeEthAddress } from '../../common/utils/eip55';
-import { RpcRateLimitService } from '../../services/rpc-rate-limit/rpc-rate-limit.service';
+import { RpcClientService } from '../../services/rpc-client/rpc-client.service';
 
 @Injectable()
 export class RewardsService {
@@ -31,7 +31,7 @@ export class RewardsService {
     private leaderBoardRewardsModel: Model<LeaderBoardRewardsDocument>,
     private readonly cacheService: CacheService,
     private readonly web3Service: Web3Service,
-    private readonly rpcRateLimitService: RpcRateLimitService,
+    private readonly rpcClientService: RpcClientService,
   ) {}
 
   async getRewardsBoost() {
@@ -184,10 +184,10 @@ export class RewardsService {
           Number(chainId) as ChainId,
         );
 
-        const { request } = await this.rpcRateLimitService.executeWithRateLimit(
+        const { request } = await this.rpcClientService.execute(
           Number(chainId) as ChainId,
-          () =>
-            publicClient.simulateContract({
+          (client) =>
+            client.simulateContract({
               account: ownerAccount,
               address: `0x0000000000000000000000000000000000000000` as `0x${string}`,
               abi: erc20Abi,
