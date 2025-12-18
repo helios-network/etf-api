@@ -5,6 +5,7 @@ import { CacheService } from '../../infrastructure/cache/cache.service';
 import { ETF, ETFDocument } from '../../models/etf.schema';
 import { Web3Service } from '../../services/web3.service';
 import { EtfResolverService } from '../../services/etf-resolver.service';
+import { ChainlinkResolverService } from '../../services/chainlink-resolver.service';
 import { ChainId } from '../../config/web3';
 import { ETF_CONTRACT_ADDRS, MIN_LIQUIDITY_USD } from '../../constants';
 import {
@@ -27,6 +28,7 @@ export class EtfsService {
     private readonly cacheService: CacheService,
     private readonly web3Service: Web3Service,
     private readonly etfResolver: EtfResolverService,
+    private readonly chainlinkResolver: ChainlinkResolverService,
   ) {}
 
   async getAll(page: number, size: number, search?: string) {
@@ -176,13 +178,10 @@ export class EtfsService {
     const tokenModes: Map<string, PricingMode[]> = new Map();
     const tokenMetadataMap: Map<string, TokenMetadata> = new Map();
 
+    let hasDepositTokenInComponents = false;
+
     for (const component of body.components) {
       const targetToken = component.token as `0x${string}`;
-
-      // Skip if target token is the same as deposit token (case-insensitive comparison)
-      if (targetToken.toLowerCase() === depositToken.toLowerCase()) {
-        continue;
-      }
 
       try {
         // Get target token metadata
@@ -190,7 +189,14 @@ export class EtfsService {
           targetToken,
           chainId,
         );
+
         tokenMetadataMap.set(targetToken, targetTokenMetadata);
+
+        // setup empty data if target token is the same as deposit token
+        if (targetToken.toLowerCase() === depositToken.toLowerCase()) {
+          hasDepositTokenInComponents = true;
+          continue;
+        }
 
         // Find all possible modes for this token
         const possibleModes = await this.etfResolver.findPossibleModes(
@@ -274,7 +280,7 @@ export class EtfsService {
     for (const component of body.components) {
       const targetToken = component.token as `0x${string}`;
 
-      // Skip if target token is the same as deposit token
+      // Skip if target token is the same as deposit token (will be handled at the end)
       if (targetToken.toLowerCase() === depositToken.toLowerCase()) {
         continue;
       }
@@ -319,6 +325,85 @@ export class EtfsService {
         };
         return errorResponse;
       }
+    }
+
+    // Step 4: If deposit token is in components, add it with empty paths and deposit token feed
+    if (hasDepositTokenInComponents) {
+      // Get feed for deposit token
+      let depositFeed = await this.chainlinkResolver.resolveChainlinkFeed(
+        depositTokenMetadata.symbol,
+        chainId,
+      );
+      
+      // If no feed found and token symbol starts with 'W', try without 'W'
+      if (!depositFeed && depositTokenMetadata.symbol.startsWith('W')) {
+        depositFeed = await this.chainlinkResolver.resolveChainlinkFeed(
+          depositTokenMetadata.symbol.slice(1),
+          chainId,
+        );
+      }
+
+      if (!depositFeed) {
+        const errorResponse: VerifyErrorResponse = {
+          status: 'ERROR',
+          reason: 'NO_POOL_FOUND',
+          details: {
+            token: depositTokenMetadata.symbol,
+            message: 'No feed found for deposit token',
+          },
+        };
+        return errorResponse;
+      }
+
+      // Create empty paths based on common mode
+      const emptyAddress = '0x0000000000000000000000000000000000000000';
+      let emptyDepositPath: ComponentVerification['depositPath'];
+      let emptyWithdrawPath: ComponentVerification['withdrawPath'];
+
+      if (commonMode.startsWith('V2')) {
+        // V2 paths: empty address array
+        emptyDepositPath = {
+          type: 'V2',
+          encoded: this.etfResolver.encodeV2Paths([emptyAddress, emptyAddress], [emptyAddress, emptyAddress]),
+          path: [
+            emptyAddress,
+            emptyAddress,
+          ],
+        };
+        emptyWithdrawPath = {
+          type: 'V2',
+          encoded: this.etfResolver.encodeV2Paths([emptyAddress, emptyAddress], [emptyAddress, emptyAddress]),
+          path: [
+            emptyAddress,
+            emptyAddress,
+          ],
+        };
+      } else {
+        // V3 paths: empty token0, token1, fee = 0
+        const v3ResolutionResult = this.etfResolver.encodeV3ResolutionResult(chainId, {
+          exists: false,
+          liquidityUSD: -1,
+          isDirect: true,
+          fee: 100,
+        }, emptyAddress, emptyAddress, null);
+        emptyDepositPath = v3ResolutionResult.depositPath;
+        emptyWithdrawPath = v3ResolutionResult.withdrawPath;
+      }
+
+      // Build component verification for deposit token
+      const depositTokenVerification: ComponentVerification = {
+        token: depositTokenMetadata.symbol,
+        tokenAddress: depositToken,
+        symbol: depositTokenMetadata.symbol,
+        decimals: depositTokenMetadata.decimals,
+        pricingMode: commonMode,
+        feed: depositFeed?.proxyAddress || null,
+        depositPath: emptyDepositPath,
+        withdrawPath: emptyWithdrawPath,
+        liquidityUSD: -1,
+      };
+
+      componentVerifications.push(depositTokenVerification);
     }
 
     // All components verified successfully

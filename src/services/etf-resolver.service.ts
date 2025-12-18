@@ -105,7 +105,7 @@ export class EtfResolverService {
    * Encode V2 paths for deposit/withdraw
    * Format: encode(["address[]", "address[]"], [depositPath, withdrawPath])
    */
-  private encodeV2Paths(depositPath: string[], withdrawPath: string[]): string {
+  public encodeV2Paths(depositPath: string[], withdrawPath: string[]): string {
     return encodeAbiParameters(
       [{ type: 'address[]' }, { type: 'address[]' }],
       [depositPath as `0x${string}`[], withdrawPath as `0x${string}`[]],
@@ -381,7 +381,7 @@ export class EtfResolverService {
   /**
    * Helper function to encode V3 resolution result
    */
-  private encodeV3ResolutionResult(
+  public encodeV3ResolutionResult(
     chainId: number,
     v3Path: {
       exists: boolean;
