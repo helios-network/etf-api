@@ -44,6 +44,22 @@ export class EtfsController {
     }
   }
 
+  @Get('stats')
+  async getStatistics() {
+    try {
+      const result = await this.etfsService.getStatistics();
+      return result;
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Get('deposit-tokens')
   async getDepositTokens(@Query('chainId') chainId: number, @Query('search') search?: string) {
     try {

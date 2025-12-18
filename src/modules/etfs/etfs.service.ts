@@ -99,6 +99,42 @@ export class EtfsService {
     );
   }
 
+  async getStatistics() {
+    const cacheKey = 'statistics';
+
+    return await this.cacheService.wrap(
+      cacheKey,
+      async () => {
+        const totalEtfs = await this.etfModel.countDocuments({});
+
+        const statsResult = await this.etfModel.aggregate([
+          {
+            $group: {
+              _id: null,
+              totalTVL: { $sum: { $ifNull: ['$tvl', 0] } },
+              totalDailyVolume: { $sum: { $ifNull: ['$dailyVolumeUSD', 0] } },
+            },
+          },
+        ]);
+
+        const stats = statsResult[0] || { totalTVL: 0, totalDailyVolume: 0 };
+
+        return {
+          success: true,
+          data: {
+            totalEtfs,
+            totalTVL: Number(stats.totalTVL.toFixed(2)),
+            totalDailyVolume: Number(stats.totalDailyVolume.toFixed(2)),
+          },
+        };
+      },
+      {
+        namespace: 'etfs',
+        ttl: 60,
+      },
+    );
+  }
+
   async verifyETF(body: VerifyEtfDto): Promise<VerifyResponse> {
     // No cache for POST /verify (calculation operation)
 
