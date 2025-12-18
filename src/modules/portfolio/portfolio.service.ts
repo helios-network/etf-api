@@ -7,9 +7,8 @@ import {
   WalletHoldingDocument,
 } from '../../models/wallet-holding.schema';
 import { ETF, ETFDocument } from '../../models/etf.schema';
-import { PortfolioResponseDto } from './dto/portfolio-response.dto';
 import { PortfolioAssetDto } from './dto/portfolio-asset.dto';
-import { PortfolioSummaryDto, AllocationDto } from './dto/portfolio-summary.dto';
+import { PortfolioCompleteDto, AllocationDto } from './dto/portfolio-complete.dto';
 import { normalizeEthAddress } from '../../common/utils/eip55';
 
 @Injectable()
@@ -103,157 +102,13 @@ export class PortfolioService {
     }));
   }
 
-  /**
-   * Get portfolio overview for a wallet
-   */
-  async getPortfolio(address: string): Promise<{
+  async getPortfolioAll(address: string): Promise<{
     success: boolean;
-    data?: PortfolioResponseDto;
+    data?: PortfolioCompleteDto;
     message?: string;
   }> {
     const normalizedAddress = normalizeEthAddress(address);
-    const cacheKey = `portfolio:summary:${normalizedAddress}`;
-
-    return await this.cacheService.wrap(
-      cacheKey,
-      async () => {
-        const walletHolding = await this.walletHoldingModel
-          .findOne({
-            wallet: normalizedAddress,
-          })
-          .lean()
-          .exec();
-
-        if (!walletHolding) {
-          return {
-            success: false,
-            message: 'Wallet not found',
-          };
-        }
-
-        const deposits = walletHolding.deposits || [];
-        const totalValueUSD = deposits.reduce(
-          (sum, deposit) => sum + (deposit.amountUSD || 0),
-          0,
-        );
-        const chains = [...new Set(deposits.map((d) => d.chain))];
-
-        return {
-          success: true,
-          data: {
-            address: normalizedAddress,
-            totalValueUSD,
-            totalAssets: deposits.length,
-            chains,
-            updatedAt: walletHolding.updatedAt || walletHolding.createdAt || new Date(),
-          },
-        };
-      },
-      {
-        namespace: 'portfolio',
-        ttl: 45, // 45 seconds
-      },
-    );
-  }
-
-  /**
-   * Get detailed assets list for a wallet
-   */
-  async getPortfolioAssets(
-    address: string,
-    chain?: number,
-    symbol?: string,
-  ): Promise<{
-    success: boolean;
-    data?: PortfolioAssetDto[];
-    message?: string;
-  }> {
-    const normalizedAddress = normalizeEthAddress(address);
-    // Cache key includes filters to differentiate cached results
-    const cacheKey = `portfolio:assets:${normalizedAddress}:chain=${chain || 'all'}:symbol=${symbol || 'all'}`;
-
-    return await this.cacheService.wrap(
-      cacheKey,
-      async () => {
-        const walletHolding = await this.walletHoldingModel
-          .findOne({
-            wallet: normalizedAddress,
-          })
-          .lean()
-          .exec();
-
-        if (!walletHolding) {
-          return {
-            success: false,
-            message: 'Wallet not found',
-          };
-        }
-
-        let deposits = walletHolding.deposits || [];
-
-        // Apply filters
-        if (chain !== undefined) {
-          deposits = deposits.filter((d) => d.chain === chain);
-        }
-        if (symbol !== undefined) {
-          deposits = deposits.filter((d) => d.symbol === symbol);
-        }
-
-        if (deposits.length === 0) {
-          return {
-            success: true,
-            data: [],
-          };
-        }
-
-        // Extract unique vault addresses
-        const vaultAddresses = [
-          ...new Set(deposits.map((d) => normalizeEthAddress(d.etfVaultAddress))),
-        ];
-
-        // Fetch all ETFs in one query
-        const etfs = await this.etfModel
-          .find({
-            vault: { $in: vaultAddresses },
-          })
-          .lean()
-          .exec();
-
-        // Create Map for O(1) lookup
-        const etfMap = new Map<string, ETF>(
-          etfs.map((etf) => [normalizeEthAddress(etf.vault), etf]),
-        );
-
-        // Enrich deposits with ETF data
-        const enrichedAssets = deposits.map((deposit) => {
-          const normalizedVaultAddress = normalizeEthAddress(deposit.etfVaultAddress);
-          const etf = etfMap.get(normalizedVaultAddress) || null;
-          deposit.amountUSD = (etf?.sharePrice ?? 0) * Number(deposit.amount) / Math.pow(10, etf?.shareDecimals ?? 18);
-          return this.enrichDepositWithETF(deposit, etf);
-        });
-
-        return {
-          success: true,
-          data: enrichedAssets,
-        };
-      },
-      {
-        namespace: 'portfolio',
-        ttl: 45, // 45 seconds
-      },
-    );
-  }
-
-  /**
-   * Get portfolio summary with allocation
-   */
-  async getPortfolioSummary(address: string): Promise<{
-    success: boolean;
-    data?: PortfolioSummaryDto;
-    message?: string;
-  }> {
-    const normalizedAddress = normalizeEthAddress(address);
-    const cacheKey = `portfolio:summary:${normalizedAddress}`;
+    const cacheKey = `portfolio:all:${normalizedAddress}`;
 
     return await this.cacheService.wrap(
       cacheKey,
@@ -281,18 +136,19 @@ export class PortfolioService {
               address: normalizedAddress,
               totalValueUSD: 0,
               totalAssets: 0,
+              chains: [],
+              updatedAt: walletHolding.updatedAt || walletHolding.createdAt || new Date(),
+              assets: [],
               allocation: [],
               byChain: {},
             },
           };
         }
 
-        // Extract unique vault addresses
         const vaultAddresses = [
           ...new Set(deposits.map((d) => normalizeEthAddress(d.etfVaultAddress))),
         ];
 
-        // Fetch all ETFs in one query
         const etfs = await this.etfModel
           .find({
             vault: { $in: vaultAddresses },
@@ -300,15 +156,14 @@ export class PortfolioService {
           .lean()
           .exec();
 
-        // Create Map for O(1) lookup
         const etfMap = new Map<string, ETF>(
           etfs.map((etf) => [normalizeEthAddress(etf.vault), etf]),
         );
 
-        // Enrich deposits with ETF data
         const enrichedAssets = deposits.map((deposit) => {
           const normalizedVaultAddress = normalizeEthAddress(deposit.etfVaultAddress);
           const etf = etfMap.get(normalizedVaultAddress) || null;
+          deposit.amountUSD = (etf?.sharePrice ?? 0) * Number(deposit.amount) / Math.pow(10, etf?.shareDecimals ?? 18);
           return this.enrichDepositWithETF(deposit, etf);
         });
 
@@ -317,10 +172,9 @@ export class PortfolioService {
           0,
         );
 
-        // Calculate allocation
+        const chains = [...new Set(deposits.map((d) => d.chain))];
         const allocation = this.calculateAllocation(enrichedAssets);
 
-        // Calculate by chain
         const byChain: Record<number, number> = {};
         for (const asset of enrichedAssets) {
           byChain[asset.chain] = (byChain[asset.chain] || 0) + asset.amountUSD;
@@ -332,6 +186,9 @@ export class PortfolioService {
             address: normalizedAddress,
             totalValueUSD,
             totalAssets: deposits.length,
+            chains,
+            updatedAt: walletHolding.updatedAt || walletHolding.createdAt || new Date(),
+            assets: enrichedAssets,
             allocation,
             byChain,
           },
@@ -339,7 +196,7 @@ export class PortfolioService {
       },
       {
         namespace: 'portfolio',
-        ttl: 45, // 45 seconds
+        ttl: 45,
       },
     );
   }
