@@ -17,6 +17,7 @@ import {
   TokenMetadata,
 } from '../../types/etf-verify.types';
 import { VerifyEtfDto } from './dto/verify-etf.dto';
+import { normalizeEthAddress } from 'src/common/utils/eip55';
 
 @Injectable()
 export class EtfsService {
@@ -29,7 +30,7 @@ export class EtfsService {
     private readonly web3Service: Web3Service,
     private readonly etfResolver: EtfResolverService,
     private readonly chainlinkResolver: ChainlinkResolverService,
-  ) {}
+  ) { }
 
   async getAll(page: number, size: number, search?: string) {
     // Validate pagination parameters
@@ -44,12 +45,12 @@ export class EtfsService {
     const normalizedSearch = search && search.trim() ? search.trim() : '';
     const searchFilter = normalizedSearch
       ? {
-          $or: [
-            { name: { $regex: normalizedSearch, $options: 'i' } },
-            { symbol: { $regex: normalizedSearch, $options: 'i' } },
-            { 'assets.symbol': { $regex: normalizedSearch, $options: 'i' } },
-          ],
-        }
+        $or: [
+          { name: { $regex: normalizedSearch, $options: 'i' } },
+          { symbol: { $regex: normalizedSearch, $options: 'i' } },
+          { 'assets.symbol': { $regex: normalizedSearch, $options: 'i' } },
+        ],
+      }
       : {};
 
     // Build cache key with all parameters that influence the result
@@ -94,6 +95,34 @@ export class EtfsService {
       },
       {
         namespace: 'etfs',
+        ttl: 60, // 60 seconds
+      },
+    );
+  }
+
+  async getEtfWithVault(vaultAddress: string) {
+    // Build cache key with all parameters that influence the result
+    const normalizedVault = normalizeEthAddress(vaultAddress);
+
+    const cacheKey = `etf:vaultAddress=${normalizedVault}`;
+
+    // Use cache-aside pattern with 60 seconds TTL
+    return await this.cacheService.wrap(
+      cacheKey,
+      async () => {
+        // Fetch ETF
+        const etf = await this.etfModel
+          .findOne({ vault: normalizedVault })
+          .lean()
+          .exec();
+
+        return {
+          success: true,
+          data: etf,
+        };
+      },
+      {
+        namespace: 'etf',
         ttl: 60, // 60 seconds
       },
     );
@@ -370,7 +399,7 @@ export class EtfsService {
         depositTokenMetadata.symbol,
         chainId,
       );
-      
+
       // If no feed found and token symbol starts with 'W', try without 'W'
       if (!depositFeed && depositTokenMetadata.symbol.startsWith('W')) {
         depositFeed = await this.chainlinkResolver.resolveChainlinkFeed(
