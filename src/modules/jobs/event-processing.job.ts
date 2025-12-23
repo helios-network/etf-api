@@ -631,6 +631,12 @@ export class EventProcessingJob {
       this.logger.error(`Error finding wallets for rebalance event in vault ${normalizedVault}`);
     }
 
+    // Update latestRebalanceDate on the ETF
+    await this.etfModel.updateOne(
+      { _id: etf._id },
+      { $set: { latestRebalanceDate: new Date() } },
+    );
+
     // TODO: save liquidity tvl on the etf
     return true;
   }
@@ -793,7 +799,7 @@ export class EventProcessingJob {
           fromBlock,
           toBlock,
           events: parseAbi([
-            'event Rebalance(address indexed vault, address user, uint256 fromIndex, uint256 toIndex, uint256 moveValue, uint256 eventNonce, uint256 eventHeight, uint256 bought)',
+            'event Rebalance(address indexed vault, address user, uint256 totalSoldValueUSD, uint256 totalBoughtValueUSD, uint256[] soldAmounts, uint256[] boughtAmounts, uint256[] soldValuesUSD, uint256[] boughtValuesUSD, uint256 eventNonce, uint256 eventHeight)',
           ]),
         }),
     );
@@ -820,7 +826,7 @@ export class EventProcessingJob {
           fromBlock,
           toBlock,
           events: parseAbi([
-            'event ParamsUpdated(address indexed vault, uint256 imbalanceThresholdBps, uint256 maxPriceStaleness, uint256 hlsBalance, uint256 eventNonce, uint256 eventHeight)',
+            'event ParamsUpdated(address indexed vault, uint256 imbalanceThresholdBps, uint256 maxPriceStaleness, uint64 rebalanceCooldown, uint128 maxCapacityUSD, uint256 hlsBalance, uint256 eventNonce, uint256 eventHeight)',
           ]),
         }),
     );

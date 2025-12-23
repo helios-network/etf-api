@@ -110,6 +110,9 @@ export class ETF {
   @Prop({ type: Number })
   shareDecimals?: number;
 
+  @Prop({ type: Date })
+  latestRebalanceDate?: Date;
+
   createdAt?: Date;
   updatedAt?: Date;
 }
