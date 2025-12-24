@@ -5,12 +5,14 @@ import { Model } from 'mongoose';
 import {
   WalletHolding,
   WalletHoldingDocument,
-} from '../../models/wallet-holding.schema';
-import { Event, EventDocument } from '../../models/event.schema';
-import { ETF, ETFDocument } from '../../models/etf.schema';
-import { TRANSACTION_POINTS } from '../../constants/transaction-points';
-import { normalizeEthAddress } from '../../common/utils/eip55';
-import { EtfVolumeService } from '../../services/etf-volume.service';
+  Event,
+  EventDocument,
+  ETF,
+  ETFDocument,
+} from 'src/models';
+import { TRANSACTION_POINTS } from 'src/constants/transaction-points';
+import { normalizeEthAddress } from 'src/common/utils/eip55';
+import { EtfVolumeService } from 'src/services';
 
 const BATCH_SIZE = 100; // Number of wallets to process per batch
 
@@ -57,7 +59,7 @@ export class VolumeSyncJob {
       for (const wallet of wallets) {
         try {
           const newVolume = await this.calculateVolumeFromEvents(wallet.wallet);
-          
+
           if (newVolume !== wallet.volumeTradedUSD) {
             await this.walletHoldingModel.updateOne(
               { _id: wallet._id },
@@ -71,10 +73,7 @@ export class VolumeSyncJob {
           processed++;
         } catch (error) {
           errors++;
-          this.logger.error(
-            `Error processing wallet ${wallet.wallet}:`,
-            error,
-          );
+          this.logger.error(`Error processing wallet ${wallet.wallet}:`, error);
         }
       }
 
@@ -94,9 +93,11 @@ export class VolumeSyncJob {
   /**
    * Calculate volumeTradedUSD from historical Deposit and Redeem events
    */
-  private async calculateVolumeFromEvents(walletAddress: string): Promise<number> {
+  private async calculateVolumeFromEvents(
+    walletAddress: string,
+  ): Promise<number> {
     const normalizedWalletAddress = normalizeEthAddress(walletAddress);
-    
+
     // Get all Deposit and Redeem events for this wallet
     const depositEvents = await this.eventModel
       .find({
@@ -125,7 +126,9 @@ export class VolumeSyncJob {
       }
 
       try {
-        const normalizedVault = event.vault ? normalizeEthAddress(event.vault) : undefined;
+        const normalizedVault = event.vault
+          ? normalizeEthAddress(event.vault)
+          : undefined;
         if (!normalizedVault) continue;
         const volume = await this.calculateEventVolume(
           normalizedVault,
@@ -180,7 +183,10 @@ export class VolumeSyncJob {
   ): Promise<number> {
     const normalizedVault = normalizeEthAddress(vault);
     // Get ETF
-    const etf = await this.etfModel.findOne({ vault: normalizedVault, chain }).lean().exec();
+    const etf = await this.etfModel
+      .findOne({ vault: normalizedVault, chain })
+      .lean()
+      .exec();
 
     if (!etf) {
       this.logger.warn(`ETF not found for vault ${vault} on chain ${chain}`);
@@ -208,16 +214,16 @@ export class VolumeSyncJob {
     this.logger.log(`Resyncing volume for wallet ${walletAddress}...`);
 
     const normalizedWalletAddress = normalizeEthAddress(walletAddress);
-    const newVolume = await this.calculateVolumeFromEvents(normalizedWalletAddress);
+    const newVolume = await this.calculateVolumeFromEvents(
+      normalizedWalletAddress,
+    );
 
     await this.walletHoldingModel.updateOne(
       { wallet: normalizedWalletAddress },
       { $set: { volumeTradedUSD: newVolume } },
     );
 
-    this.logger.log(
-      `Updated wallet ${walletAddress} volume to ${newVolume}`,
-    );
+    this.logger.log(`Updated wallet ${walletAddress} volume to ${newVolume}`);
 
     return newVolume;
   }
@@ -234,7 +240,7 @@ export class VolumeSyncJob {
     rebalanceCount: number;
   }> {
     const normalizedWalletAddress = normalizeEthAddress(walletAddress);
-    
+
     // Count Deposit events
     const depositCount = await this.eventModel
       .countDocuments({
@@ -270,7 +276,11 @@ export class VolumeSyncJob {
       .exec();
 
     let rebalanceCount = 0;
-    if (walletHolding && walletHolding.deposits && walletHolding.deposits.length > 0) {
+    if (
+      walletHolding &&
+      walletHolding.deposits &&
+      walletHolding.deposits.length > 0
+    ) {
       // Get unique vault addresses from deposits
       const vaultAddresses = [
         ...new Set(
@@ -282,7 +292,9 @@ export class VolumeSyncJob {
 
       if (vaultAddresses.length > 0) {
         // Normalize vault addresses
-        const normalizedVaultAddresses = vaultAddresses.map(v => normalizeEthAddress(v));
+        const normalizedVaultAddresses = vaultAddresses.map((v) =>
+          normalizeEthAddress(v),
+        );
         // Count Rebalance events for these vaults
         rebalanceCount = await this.eventModel
           .countDocuments({
@@ -359,10 +371,7 @@ export class VolumeSyncJob {
           processed++;
         } catch (error) {
           errors++;
-          this.logger.error(
-            `Error processing wallet ${wallet.wallet}:`,
-            error,
-          );
+          this.logger.error(`Error processing wallet ${wallet.wallet}:`, error);
         }
       }
 
@@ -382,9 +391,7 @@ export class VolumeSyncJob {
   /**
    * Resynchronize transaction counts for a specific wallet
    */
-  async resyncTransactionCountsForWallet(
-    walletAddress: string,
-  ): Promise<{
+  async resyncTransactionCountsForWallet(walletAddress: string): Promise<{
     createEtfCount: number;
     depositCount: number;
     redeemCount: number;
@@ -395,7 +402,9 @@ export class VolumeSyncJob {
     );
 
     const normalizedWalletAddress = normalizeEthAddress(walletAddress);
-    const counts = await this.calculateTransactionCountsFromEvents(normalizedWalletAddress);
+    const counts = await this.calculateTransactionCountsFromEvents(
+      normalizedWalletAddress,
+    );
 
     await this.walletHoldingModel.updateOne(
       { wallet: normalizedWalletAddress },
@@ -452,7 +461,9 @@ export class VolumeSyncJob {
 
     // Points are calculated from transaction counts in the leaderboard service
     // so we don't need to store them separately, they're computed on the fly
-    this.logger.log('Transaction counts and points resynchronization completed.');
+    this.logger.log(
+      'Transaction counts and points resynchronization completed.',
+    );
   }
 
   /**

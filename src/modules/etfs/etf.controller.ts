@@ -8,9 +8,10 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
+import { EtfPriceChartService } from 'src/services';
+
 import { EtfsService } from './etfs.service';
 import { VerifyEtfDto } from './dto/verify-etf.dto';
-import { EtfPriceChartService } from '../../services/etf-price-chart.service';
 
 /**
  * Controller pour les routes /etf (alias sans préfixe /api)
@@ -24,7 +25,11 @@ export class EtfController {
   ) {}
 
   @Get()
-  async getAll(@Query('page') page?: string, @Query('size') size?: string, @Query('search') search?: string) {
+  async getAll(
+    @Query('page') page?: string,
+    @Query('size') size?: string,
+    @Query('search') search?: string,
+  ) {
     try {
       const pageNum = parseInt(page || '1', 10);
       const sizeNum = parseInt(size || '10', 10);
@@ -65,7 +70,10 @@ export class EtfController {
   }
 
   @Get('deposit-tokens')
-  async getDepositTokens(@Query('chainId') chainId: number, @Query('search') search?: string) {
+  async getDepositTokens(
+    @Query('chainId') chainId: number,
+    @Query('search') search?: string,
+  ) {
     try {
       return await this.etfsService.getDepositTokens(chainId, search);
     } catch (error) {
@@ -101,7 +109,8 @@ export class EtfController {
           reason: 'INTERNAL_ERROR',
           details: {
             token: '',
-            message: error instanceof Error ? error.message : 'Unknown error occurred',
+            message:
+              error instanceof Error ? error.message : 'Unknown error occurred',
           },
         },
         HttpStatus.INTERNAL_SERVER_ERROR,

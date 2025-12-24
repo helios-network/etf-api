@@ -1,16 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { MasterOnly } from '../../common/decorators/master-only.decorator';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { MasterOnly } from 'src/common/decorators/master-only.decorator';
 import {
   LeaderBoardRewards,
   LeaderBoardRewardsDocument,
-} from '../../models/leader-board-rewards.schema';
-import {
   WalletHolding,
   WalletHoldingDocument,
-} from '../../models/wallet-holding.schema';
+} from 'src/models';
 
 const BATCH_SIZE = 1000; // Number of documents to process per batch
 
@@ -148,12 +146,7 @@ export class RewardDistributionJob {
       }
 
       const bulkOps = walletHoldings.map((walletHolding) => {
-        const amount = this.getWalletAmount(
-          walletHolding,
-          type,
-          chain,
-          symbol,
-        );
+        const amount = this.getWalletAmount(walletHolding, type, chain, symbol);
         if (amount === 0n) return undefined; // Skip wallets with no amount
 
         const rewardAmount = (dailyReward * amount) / totalParts;
@@ -192,14 +185,11 @@ export class RewardDistributionJob {
   @Cron('0 0 0 * * *') // Every day at midnight
   async processDailyRewards(): Promise<void> {
     // const currentTime = this.getCurrentTime()
-
     // const poolReward = await this.getActivePoolReward(currentTime)
     // if (!poolReward) return
-
     // const type = poolReward.type === "deposit" ? "deposits" : "borrows"
     // const query = this.buildQuery(type, poolReward.chain, poolReward.symbol)
     // const dailyReward = this.calculateDailyReward(poolReward)
-
     // // First pass: calculate the total parts
     // const totalParts = await this.calculateTotalParts(
     //   query,
@@ -207,9 +197,7 @@ export class RewardDistributionJob {
     //   poolReward.chain,
     //   poolReward.symbol
     // )
-
     // if (totalParts === 0n) return
-
     // // Second pass: distribute the rewards
     // await this.distributeRewards(
     //   query,

@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { WalletHolding, WalletHoldingSchema, ETF, ETFSchema } from 'src/models';
+import { WalletHoldingUtilsService } from 'src/services';
+
 import { LeaderBoardController } from './leader-board.controller';
 import { LeaderBoardService } from './leader-board.service';
-import { WalletHolding, WalletHoldingSchema } from '../../models/wallet-holding.schema';
-import { ETF, ETFSchema } from '../../models/etf.schema';
-import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
 
 @Module({
   imports: [

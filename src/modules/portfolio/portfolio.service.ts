@@ -1,15 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CacheService } from '../../infrastructure/cache/cache.service';
+import { CacheService } from 'src/infrastructure/cache/cache.service';
 import {
   WalletHolding,
   WalletHoldingDocument,
-} from '../../models/wallet-holding.schema';
-import { ETF, ETFDocument } from '../../models/etf.schema';
+  ETF,
+  ETFDocument,
+} from 'src/models';
+import { normalizeEthAddress } from 'src/common/utils/eip55';
+
 import { PortfolioAssetDto } from './dto/portfolio-asset.dto';
-import { PortfolioCompleteDto, AllocationDto } from './dto/portfolio-complete.dto';
-import { normalizeEthAddress } from '../../common/utils/eip55';
+import {
+  PortfolioCompleteDto,
+  AllocationDto,
+} from './dto/portfolio-complete.dto';
 
 @Injectable()
 export class PortfolioService {
@@ -22,7 +27,6 @@ export class PortfolioService {
     private etfModel: Model<ETFDocument>,
     private readonly cacheService: CacheService,
   ) {}
-
 
   /**
    * Enrich deposit with ETF metadata
@@ -66,18 +70,24 @@ export class PortfolioService {
   /**
    * Calculate allocation percentages from assets
    */
-  private calculateAllocation(
-    assets: PortfolioAssetDto[],
-  ): AllocationDto[] {
+  private calculateAllocation(assets: PortfolioAssetDto[]): AllocationDto[] {
     const totalUSD = assets.reduce((sum, asset) => sum + asset.amountUSD, 0);
-    
+
     if (totalUSD === 0) {
       return [];
     }
 
     // Group by symbol + vault to handle same symbol on different chains
-    const grouped = new Map<string, { amountUSD: number; chain: number; symbol: string; etfVaultAddress: string }>();
-    
+    const grouped = new Map<
+      string,
+      {
+        amountUSD: number;
+        chain: number;
+        symbol: string;
+        etfVaultAddress: string;
+      }
+    >();
+
     for (const asset of assets) {
       const key = `${asset.symbol}-${asset.etfVaultAddress}`;
       const existing = grouped.get(key);
@@ -137,7 +147,10 @@ export class PortfolioService {
               totalValueUSD: 0,
               totalAssets: 0,
               chains: [],
-              updatedAt: walletHolding.updatedAt || walletHolding.createdAt || new Date(),
+              updatedAt:
+                walletHolding.updatedAt ||
+                walletHolding.createdAt ||
+                new Date(),
               assets: [],
               allocation: [],
               byChain: {},
@@ -146,7 +159,9 @@ export class PortfolioService {
         }
 
         const vaultAddresses = [
-          ...new Set(deposits.map((d) => normalizeEthAddress(d.etfVaultAddress))),
+          ...new Set(
+            deposits.map((d) => normalizeEthAddress(d.etfVaultAddress)),
+          ),
         ];
 
         const etfs = await this.etfModel
@@ -161,9 +176,13 @@ export class PortfolioService {
         );
 
         const enrichedAssets = deposits.map((deposit) => {
-          const normalizedVaultAddress = normalizeEthAddress(deposit.etfVaultAddress);
+          const normalizedVaultAddress = normalizeEthAddress(
+            deposit.etfVaultAddress,
+          );
           const etf = etfMap.get(normalizedVaultAddress) || null;
-          deposit.amountUSD = (etf?.sharePrice ?? 0) * Number(deposit.amount) / Math.pow(10, etf?.shareDecimals ?? 18);
+          deposit.amountUSD =
+            ((etf?.sharePrice ?? 0) * Number(deposit.amount)) /
+            Math.pow(10, etf?.shareDecimals ?? 18);
           return this.enrichDepositWithETF(deposit, etf);
         });
 
@@ -187,7 +206,8 @@ export class PortfolioService {
             totalValueUSD,
             totalAssets: deposits.length,
             chains,
-            updatedAt: walletHolding.updatedAt || walletHolding.createdAt || new Date(),
+            updatedAt:
+              walletHolding.updatedAt || walletHolding.createdAt || new Date(),
             assets: enrichedAssets,
             allocation,
             byChain,
@@ -201,4 +221,3 @@ export class PortfolioService {
     );
   }
 }
-

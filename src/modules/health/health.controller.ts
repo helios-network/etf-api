@@ -6,8 +6,8 @@ import {
   HealthIndicatorResult,
   MongooseHealthIndicator,
 } from '@nestjs/terminus';
-import { RedisService } from '../../database/redis/redis.service';
-import { BypassRateLimit } from '../../infrastructure/rate-limit/rate-limit.guard';
+import { RedisService } from 'src/database/redis/redis.service';
+import { BypassRateLimit } from 'src/infrastructure/rate-limit/rate-limit.guard';
 
 @Controller('health')
 export class HealthController {

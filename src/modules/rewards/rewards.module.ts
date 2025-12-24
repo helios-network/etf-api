@@ -2,13 +2,13 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { RewardsController } from './rewards.controller';
 import { RewardsService } from './rewards.service';
-import { WalletHolding, WalletHoldingSchema } from '../../models/wallet-holding.schema';
 import {
+  WalletHolding,
+  WalletHoldingSchema,
   LeaderBoardRewards,
   LeaderBoardRewardsSchema,
-} from '../../models/leader-board-rewards.schema';
-import { Web3Service } from '../../services/web3.service';
-import { RpcClientModule } from '../../services/rpc-client/rpc-client.module';
+} from 'src/models';
+import { Web3Service, RpcClientModule } from 'src/services';
 
 @Module({
   imports: [

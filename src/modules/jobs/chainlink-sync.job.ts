@@ -1,12 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { MasterOnly } from '../../common/decorators/master-only.decorator';
+import { MasterOnly } from 'src/common/decorators/master-only.decorator';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
   ChainlinkDataFeed,
   ChainlinkDataFeedDocument,
-} from '../../models/chainlink-data-feed.schema';
+} from 'src/models/chainlink-data-feed.schema';
 
 const ETHEREUM_CHAIN_ID = 1;
 const ARBITRUM_CHAIN_ID = 42161;

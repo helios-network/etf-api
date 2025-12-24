@@ -1,37 +1,32 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { Event, EventSchema } from '../../models/event.schema';
 import {
+  Event,
+  EventSchema,
   ObserveEvents,
   ObserveEventsSchema,
-} from '../../models/observe-events.schema';
-import { ETF, ETFSchema } from '../../models/etf.schema';
-import {
+  ETF,
+  ETFSchema,
   WalletHolding,
   WalletHoldingSchema,
-} from '../../models/wallet-holding.schema';
-import {
   ChainlinkDataFeed,
   ChainlinkDataFeedSchema,
-} from '../../models/chainlink-data-feed.schema';
-import {
   LeaderBoardRewards,
   LeaderBoardRewardsSchema,
-} from '../../models/leader-board-rewards.schema';
-import {
   EtfVolume,
   EtfVolumeSchema,
-} from '../../models/etf-volume.schema';
-import {
   EtfPriceChart,
   EtfPriceChartSchema,
-} from '../../models/etf-price-chart.schema';
-import { Web3Service } from '../../services/web3.service';
-import { VaultUtilsService } from '../../services/vault-utils.service';
-import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
-import { EtfVolumeService } from '../../services/etf-volume.service';
-import { EtfPriceChartService } from '../../services/etf-price-chart.service';
-import { RpcClientModule } from '../../services/rpc-client/rpc-client.module';
+} from 'src/models';
+import {
+  Web3Service,
+  VaultUtilsService,
+  WalletHoldingUtilsService,
+  EtfVolumeService,
+  EtfPriceChartService,
+  RpcClientModule,
+} from 'src/services';
+
 import { EventProcessingJob } from './event-processing.job';
 import { ChainlinkSyncJob } from './chainlink-sync.job';
 import { RewardDistributionJob } from './reward-distribution.job';

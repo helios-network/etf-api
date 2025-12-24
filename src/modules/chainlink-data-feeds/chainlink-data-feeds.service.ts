@@ -1,11 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CacheService } from '../../infrastructure/cache/cache.service';
-import {
-  ChainlinkDataFeed,
-  ChainlinkDataFeedDocument,
-} from '../../models/chainlink-data-feed.schema';
+import { CacheService } from 'src/infrastructure/cache/cache.service';
+import { ChainlinkDataFeed, ChainlinkDataFeedDocument } from 'src/models';
 
 const ETHEREUM_CHAIN_ID = 1;
 const ARBITRUM_CHAIN_ID = 42161;

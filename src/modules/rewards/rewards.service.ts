@@ -2,21 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
-import { CacheService } from '../../infrastructure/cache/cache.service';
+import { CacheService } from 'src/infrastructure/cache/cache.service';
 import {
   WalletHolding,
   WalletHoldingDocument,
-} from '../../models/wallet-holding.schema';
-import {
   LeaderBoardRewards,
   LeaderBoardRewardsDocument,
-} from '../../models/leader-board-rewards.schema';
-import { Web3Service } from '../../services/web3.service';
-import { ChainId } from '../../config/web3';
-import { TRANSACTION_POINTS } from '../../constants/transaction-points';
+} from 'src/models';
+import { ChainId } from 'src/config/web3';
+import { TRANSACTION_POINTS } from 'src/constants/transaction-points';
 import { verifyMessage, erc20Abi } from 'viem';
-import { normalizeEthAddress } from '../../common/utils/eip55';
-import { RpcClientService } from '../../services/rpc-client/rpc-client.service';
+import { normalizeEthAddress } from 'src/common/utils/eip55';
+import { Web3Service, RpcClientService } from 'src/services';
 
 @Injectable()
 export class RewardsService {
@@ -189,7 +186,8 @@ export class RewardsService {
           (client) =>
             client.simulateContract({
               account: ownerAccount,
-              address: `0x0000000000000000000000000000000000000000` as `0x${string}`,
+              address:
+                `0x0000000000000000000000000000000000000000` as `0x${string}`,
               abi: erc20Abi,
               functionName: 'transfer',
               args: [address as `0x${string}`, totalAmount],

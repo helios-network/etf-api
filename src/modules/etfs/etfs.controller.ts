@@ -7,11 +7,12 @@ import {
   BadRequestException,
   HttpException,
   HttpStatus,
+  Param,
 } from '@nestjs/common';
+import { EtfPriceChartService } from 'src/services/etf-price-chart.service';
+
 import { EtfsService } from './etfs.service';
 import { VerifyEtfDto } from './dto/verify-etf.dto';
-import { EtfPriceChartService } from '../../services/etf-price-chart.service';
-
 @Controller('etfs')
 export class EtfsController {
   constructor(
@@ -20,7 +21,11 @@ export class EtfsController {
   ) {}
 
   @Get()
-  async getAll(@Query('page') page?: string, @Query('size') size?: string, @Query('search') search?: string) {
+  async getAll(
+    @Query('page') page?: string,
+    @Query('size') size?: string,
+    @Query('search') search?: string,
+  ) {
     try {
       const pageNum = parseInt(page || '1', 10);
       const sizeNum = parseInt(size || '10', 10);
@@ -61,7 +66,10 @@ export class EtfsController {
   }
 
   @Get('deposit-tokens')
-  async getDepositTokens(@Query('chainId') chainId: number, @Query('search') search?: string) {
+  async getDepositTokens(
+    @Query('chainId') chainId: number,
+    @Query('search') search?: string,
+  ) {
     try {
       return await this.etfsService.getDepositTokens(chainId, search);
     } catch (error) {
@@ -97,7 +105,8 @@ export class EtfsController {
           reason: 'INTERNAL_ERROR',
           details: {
             token: '',
-            message: error instanceof Error ? error.message : 'Unknown error occurred',
+            message:
+              error instanceof Error ? error.message : 'Unknown error occurred',
           },
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -105,9 +114,31 @@ export class EtfsController {
     }
   }
 
-  @Get('chart')
+  @Get('vault/:vaultAddress')
+  async getVault(@Param('vaultAddress') vaultAddress: string) {
+    try {
+      const result = await this.etfsService.getEtfWithVault(vaultAddress);
+      return result;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('must be')) {
+        throw new BadRequestException({
+          success: false,
+          error: error.message,
+        });
+      }
+      throw new HttpException(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('vault/:vaultAddress/chart')
   async getChart(
-    @Query('vaultAddress') vaultAddress?: string,
+    @Param('vaultAddress') vaultAddress: string,
     @Query('period') period?: string,
   ) {
     try {
