@@ -1,13 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CacheService } from '../../infrastructure/cache/cache.service';
-import { ETF, ETFDocument } from '../../models/etf.schema';
-import { Web3Service } from '../../services/web3.service';
-import { EtfResolverService } from '../../services/etf-resolver.service';
-import { ChainlinkResolverService } from '../../services/chainlink-resolver.service';
-import { ChainId } from '../../config/web3';
-import { ETF_CONTRACT_ADDRS, MIN_LIQUIDITY_USD } from '../../constants';
+import { CacheService } from 'src/infrastructure/cache/cache.service';
+import { ETF, ETFDocument } from 'src/models';
+import {
+  Web3Service,
+  EtfResolverService,
+  ChainlinkResolverService,
+} from 'src/services';
+import { ChainId } from 'src/config/web3';
+import { ETF_CONTRACT_ADDRS, MIN_LIQUIDITY_USD } from 'src/constants';
 import {
   VerifyResponse,
   VerifySuccessResponse,
@@ -15,9 +17,10 @@ import {
   ComponentVerification,
   PricingMode,
   TokenMetadata,
-} from '../../types/etf-verify.types';
-import { VerifyEtfDto } from './dto/verify-etf.dto';
+} from 'src/types/etf-verify.types';
 import { normalizeEthAddress } from 'src/common/utils/eip55';
+
+import { VerifyEtfDto } from './dto/verify-etf.dto';
 
 @Injectable()
 export class EtfsService {
@@ -30,7 +33,7 @@ export class EtfsService {
     private readonly web3Service: Web3Service,
     private readonly etfResolver: EtfResolverService,
     private readonly chainlinkResolver: ChainlinkResolverService,
-  ) { }
+  ) {}
 
   async getAll(page: number, size: number, search?: string) {
     // Validate pagination parameters
@@ -45,12 +48,12 @@ export class EtfsService {
     const normalizedSearch = search && search.trim() ? search.trim() : '';
     const searchFilter = normalizedSearch
       ? {
-        $or: [
-          { name: { $regex: normalizedSearch, $options: 'i' } },
-          { symbol: { $regex: normalizedSearch, $options: 'i' } },
-          { 'assets.symbol': { $regex: normalizedSearch, $options: 'i' } },
-        ],
-      }
+          $or: [
+            { name: { $regex: normalizedSearch, $options: 'i' } },
+            { symbol: { $regex: normalizedSearch, $options: 'i' } },
+            { 'assets.symbol': { $regex: normalizedSearch, $options: 'i' } },
+          ],
+        }
       : {};
 
     // Build cache key with all parameters that influence the result
@@ -168,13 +171,19 @@ export class EtfsService {
     // No cache for POST /verify (calculation operation)
 
     // Validate input
-    if (!body.chainId || !body.depositToken || !body.components || !Array.isArray(body.components)) {
+    if (
+      !body.chainId ||
+      !body.depositToken ||
+      !body.components ||
+      !Array.isArray(body.components)
+    ) {
       const errorResponse: VerifyErrorResponse = {
         status: 'ERROR',
         reason: 'INVALID_INPUT',
         details: {
           token: '',
-          message: 'Missing required fields: chainId, depositToken, or components',
+          message:
+            'Missing required fields: chainId, depositToken, or components',
         },
       };
       return errorResponse;
@@ -193,7 +202,10 @@ export class EtfsService {
     }
 
     // Validate weights sum to 100
-    const totalWeight = body.components.reduce((sum, comp) => sum + comp.weight, 0);
+    const totalWeight = body.components.reduce(
+      (sum, comp) => sum + comp.weight,
+      0,
+    );
     if (Math.abs(totalWeight - 100) > 0.01) {
       const errorResponse: VerifyErrorResponse = {
         status: 'ERROR',
@@ -226,14 +238,19 @@ export class EtfsService {
     // Get deposit token metadata
     let depositTokenMetadata: TokenMetadata;
     try {
-      depositTokenMetadata = await this.etfResolver.getTokenMetadata(depositToken, chainId);
+      depositTokenMetadata = await this.etfResolver.getTokenMetadata(
+        depositToken,
+        chainId,
+      );
     } catch (error) {
       const errorResponse: VerifyErrorResponse = {
         status: 'ERROR',
         reason: 'INVALID_INPUT',
         details: {
           token: depositToken,
-          message: `Failed to fetch deposit token metadata: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          message: `Failed to fetch deposit token metadata: ${
+            error instanceof Error ? error.message : 'Unknown error'
+          }`,
         },
       };
       return errorResponse;
@@ -289,7 +306,10 @@ export class EtfsService {
       } catch (error) {
         let targetSymbol = component.token;
         try {
-          const metadata = await this.etfResolver.getTokenMetadata(targetToken, chainId);
+          const metadata = await this.etfResolver.getTokenMetadata(
+            targetToken,
+            chainId,
+          );
           targetSymbol = metadata.symbol;
         } catch {
           // Keep original token address if metadata fetch fails
@@ -318,8 +338,8 @@ export class EtfsService {
 
     let commonMode: PricingMode | null = null;
     for (const mode of modePriority) {
-      const allTokensSupportMode = Array.from(tokenModes.values()).every((modes) =>
-        modes.includes(mode),
+      const allTokensSupportMode = Array.from(tokenModes.values()).every(
+        (modes) => modes.includes(mode),
       );
       if (allTokensSupportMode) {
         commonMode = mode;
@@ -333,7 +353,8 @@ export class EtfsService {
         reason: 'NO_POOL_FOUND',
         details: {
           token: '',
-          message: 'No common pricing mode found for all tokens. Each token supports different modes.',
+          message:
+            'No common pricing mode found for all tokens. Each token supports different modes.',
         },
       };
       return errorResponse;
@@ -385,7 +406,9 @@ export class EtfsService {
           details: {
             token: targetTokenMetadata.symbol,
             requiredUSD: MIN_LIQUIDITY_USD,
-            message: `Token does not support pricing mode ${commonMode}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            message: `Token does not support pricing mode ${commonMode}: ${
+              error instanceof Error ? error.message : 'Unknown error'
+            }`,
           },
         };
         return errorResponse;
@@ -429,28 +452,34 @@ export class EtfsService {
         // V2 paths: empty address array
         emptyDepositPath = {
           type: 'V2',
-          encoded: this.etfResolver.encodeV2Paths([emptyAddress, emptyAddress], [emptyAddress, emptyAddress]),
-          path: [
-            emptyAddress,
-            emptyAddress,
-          ],
+          encoded: this.etfResolver.encodeV2Paths(
+            [emptyAddress, emptyAddress],
+            [emptyAddress, emptyAddress],
+          ),
+          path: [emptyAddress, emptyAddress],
         };
         emptyWithdrawPath = {
           type: 'V2',
-          encoded: this.etfResolver.encodeV2Paths([emptyAddress, emptyAddress], [emptyAddress, emptyAddress]),
-          path: [
-            emptyAddress,
-            emptyAddress,
-          ],
+          encoded: this.etfResolver.encodeV2Paths(
+            [emptyAddress, emptyAddress],
+            [emptyAddress, emptyAddress],
+          ),
+          path: [emptyAddress, emptyAddress],
         };
       } else {
         // V3 paths: empty token0, token1, fee = 0
-        const v3ResolutionResult = this.etfResolver.encodeV3ResolutionResult(chainId, {
-          exists: false,
-          liquidityUSD: -1,
-          isDirect: true,
-          fee: 100,
-        }, emptyAddress, emptyAddress, null);
+        const v3ResolutionResult = this.etfResolver.encodeV3ResolutionResult(
+          chainId,
+          {
+            exists: false,
+            liquidityUSD: -1,
+            isDirect: true,
+            fee: 100,
+          },
+          emptyAddress,
+          emptyAddress,
+          null,
+        );
         emptyDepositPath = v3ResolutionResult.depositPath;
         emptyWithdrawPath = v3ResolutionResult.withdrawPath;
       }
@@ -485,7 +514,9 @@ export class EtfsService {
   async getDepositTokens(chainId: number, search?: string) {
     try {
       // Get all distinct deposit tokens
-      const depositTokens = await this.etfModel.find({ chain: chainId }).distinct('depositToken');
+      const depositTokens = await this.etfModel
+        .find({ chain: chainId })
+        .distinct('depositToken');
 
       // Filter out empty strings
       const validDepositTokens = depositTokens.filter(
@@ -537,9 +568,8 @@ export class EtfsService {
       // Apply search filter if provided and not empty
       if (search && search.trim()) {
         const searchLower = search.trim().toLowerCase();
-        filteredMetadata = filteredMetadata.filter(
-          (metadata) =>
-            metadata.symbol?.toLowerCase().includes(searchLower),
+        filteredMetadata = filteredMetadata.filter((metadata) =>
+          metadata.symbol?.toLowerCase().includes(searchLower),
         );
       }
 

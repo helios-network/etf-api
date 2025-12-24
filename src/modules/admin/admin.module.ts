@@ -1,18 +1,19 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { AdminController } from './admin.controller';
-import { VolumeSyncJob } from '../jobs/volume-sync.job';
-import { EtfVolumeService } from '../../services/etf-volume.service';
-import { Event, EventSchema } from '../../models/event.schema';
-import { ETF, ETFSchema } from '../../models/etf.schema';
+import { EtfVolumeService } from 'src/services';
 import {
+  Event,
+  EventSchema,
+  ETF,
+  ETFSchema,
   WalletHolding,
   WalletHoldingSchema,
-} from '../../models/wallet-holding.schema';
-import {
   EtfVolume,
   EtfVolumeSchema,
-} from '../../models/etf-volume.schema';
+} from 'src/models';
+
+import { AdminController } from './admin.controller';
+import { VolumeSyncJob } from '../jobs/volume-sync.job';
 
 @Module({
   imports: [

@@ -7,8 +7,9 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { EtfVolumeService } from 'src/services';
+
 import { VolumeSyncJob } from '../jobs/volume-sync.job';
-import { EtfVolumeService } from '../../services/etf-volume.service';
 
 @Controller('admin')
 export class AdminController {

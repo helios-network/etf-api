@@ -1,36 +1,36 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { MasterOnly } from '../../common/decorators/master-only.decorator';
+import { MasterOnly } from 'src/common/decorators/master-only.decorator';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { parseAbi, type PublicClient } from 'viem';
-import { ChainId } from '../../config/web3';
+import { ChainId } from 'src/config/web3';
 import {
   ETF_CONTRACT_ADDRS,
   DEFAULT_START_BLOCKS,
   AUTORIZED_DEPOSIT_TOKENS,
-} from '../../constants';
-import { Web3Service } from '../../services/web3.service';
-import { VaultUtilsService } from '../../services/vault-utils.service';
-import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
-import { EtfVolumeService } from '../../services/etf-volume.service';
-import { EtfPriceChartService } from '../../services/etf-price-chart.service';
-import { RpcClientService } from '../../services/rpc-client/rpc-client.service';
-import { Event, EventDocument } from '../../models/event.schema';
+} from 'src/constants';
 import {
+  Web3Service,
+  VaultUtilsService,
+  WalletHoldingUtilsService,
+  EtfVolumeService,
+  EtfPriceChartService,
+  RpcClientService,
+} from 'src/services';
+import {
+  Event,
+  EventDocument,
   ObserveEvents,
   ObserveEventsDocument,
-} from '../../models/observe-events.schema';
-import { ETF, ETFDocument } from '../../models/etf.schema';
-import {
+  ETF,
+  ETFDocument,
   WalletHolding,
   WalletHoldingDocument,
-} from '../../models/wallet-holding.schema';
-import {
   EtfVolume,
   EtfVolumeDocument,
-} from '../../models/etf-volume.schema';
-import { normalizeEthAddress } from '../../common/utils/eip55';
+} from 'src/models';
+import { normalizeEthAddress } from 'src/common/utils/eip55';
 
 // Constants following the Go code pattern
 const ETH_BLOCK_CONFIRMATION_DELAY = 4n; // Minimum number of confirmations for a block to be considered valid
@@ -154,7 +154,8 @@ export class EventProcessingJob {
       // Convert shares (bigint in base units) to human-readable for volume calculation
       // Old code: Number(ethers.parseUnits(shares.toString(), shareDecimals).toString())
       // Since shares is already in base units, we convert to decimal for price calculation
-      const sharesInHumanReadable = Number(shares) / Math.pow(10, shareDecimals);
+      const sharesInHumanReadable =
+        Number(shares) / Math.pow(10, shareDecimals);
       const depositAmountUSD = etf.sharePrice * sharesInHumanReadable;
       const currentVolume = walletHolding.volumeTradedUSD;
 
@@ -192,7 +193,10 @@ export class EventProcessingJob {
     await this.etfModel.updateOne(
       { _id: etf._id },
       {
-        $set: { volumeTradedUSD: etf.volumeTradedUSD, dailyVolumeUSD: etf.dailyVolumeUSD },
+        $set: {
+          volumeTradedUSD: etf.volumeTradedUSD,
+          dailyVolumeUSD: etf.dailyVolumeUSD,
+        },
         $inc: { totalSupply: Number(shares) },
       },
     );
@@ -217,7 +221,8 @@ export class EventProcessingJob {
       // Convert shares (bigint in base units) to human-readable for volume calculation
       // Old code: Number(ethers.parseUnits(shares.toString(), shareDecimals).toString())
       // Since shares is already in base units, we convert to decimal for price calculation
-      const sharesInHumanReadable = Number(shares) / Math.pow(10, shareDecimals);
+      const sharesInHumanReadable =
+        Number(shares) / Math.pow(10, shareDecimals);
       const depositAmountUSD = etf.sharePrice * sharesInHumanReadable;
       const currentVolume = walletHolding.volumeTradedUSD;
 
@@ -256,7 +261,11 @@ export class EventProcessingJob {
     await this.etfModel.updateOne(
       { _id: etf._id },
       {
-        $set: { totalSupply: newTotalSupply, volumeTradedUSD: etf.volumeTradedUSD, dailyVolumeUSD: etf.dailyVolumeUSD },
+        $set: {
+          totalSupply: newTotalSupply,
+          volumeTradedUSD: etf.volumeTradedUSD,
+          dailyVolumeUSD: etf.dailyVolumeUSD,
+        },
       },
     );
   }
@@ -334,9 +343,7 @@ export class EventProcessingJob {
       etfVaultAddress: normalizeEthAddress(etf.vault),
       etfTokenAddress: normalizeEthAddress(etf.shareToken),
       amount: amount.toString(),
-      amountUSD: etf.sharePrice
-        ? etf.sharePrice * sharesInHumanReadable
-        : 0,
+      amountUSD: etf.sharePrice ? etf.sharePrice * sharesInHumanReadable : 0,
     };
   }
 
@@ -356,7 +363,10 @@ export class EventProcessingJob {
     const normalizedUser = normalizeEthAddress(user);
 
     // Get or create wallet holding
-    const walletHolding = this.getOrCreateWalletHolding(normalizedUser, holdingsMap);
+    const walletHolding = this.getOrCreateWalletHolding(
+      normalizedUser,
+      holdingsMap,
+    );
 
     // Get ETF from database
     const etf = await this.etfModel.findOne({ vault: normalizedVault });
@@ -385,8 +395,10 @@ export class EventProcessingJob {
       // Always update metadata if ETF is available (to fix old deposits with wrong symbol)
       walletHolding.deposits[depositIndex].symbol = etf.symbol;
       walletHolding.deposits[depositIndex].decimals = etf.shareDecimals ?? 18;
-      walletHolding.deposits[depositIndex].etfVaultAddress = normalizeEthAddress(etf.vault);
-      walletHolding.deposits[depositIndex].etfTokenAddress = normalizeEthAddress(etf.shareToken);
+      walletHolding.deposits[depositIndex].etfVaultAddress =
+        normalizeEthAddress(etf.vault);
+      walletHolding.deposits[depositIndex].etfTokenAddress =
+        normalizeEthAddress(etf.shareToken);
     } else {
       // Create new deposit
       const deposit = this.createDepositObject(chainId, etf, vault, sharesOut);
@@ -395,13 +407,13 @@ export class EventProcessingJob {
 
     // Increment deposit count
     walletHolding.depositCount = (walletHolding.depositCount ?? 0) + 1;
-    
+
     // Increment ETF deposit count
     await this.etfModel.updateOne(
       { _id: etf._id },
       { $inc: { depositCount: 1 } },
     );
-    
+
     // Apply middlewares
     await this.middlewareAfterDeposit(sharesOut, walletHolding, etf);
     return true;
@@ -423,7 +435,10 @@ export class EventProcessingJob {
     const normalizedUser = normalizeEthAddress(user);
 
     // Get or create wallet holding
-    const walletHolding = this.getOrCreateWalletHolding(normalizedUser, holdingsMap);
+    const walletHolding = this.getOrCreateWalletHolding(
+      normalizedUser,
+      holdingsMap,
+    );
 
     // Get ETF from database
     const etf = await this.etfModel.findOne({ vault: normalizedVault });
@@ -467,13 +482,13 @@ export class EventProcessingJob {
 
     // Increment redeem count
     walletHolding.redeemCount = (walletHolding.redeemCount ?? 0) + 1;
-    
+
     // Increment ETF redeem count
     await this.etfModel.updateOne(
       { _id: etf._id },
       { $inc: { redeemCount: 1 } },
     );
-    
+
     // Apply middlewares
     await this.middlewareAfterRedeem(sharesIn, walletHolding, etf);
     return true;
@@ -506,16 +521,16 @@ export class EventProcessingJob {
     if (log.transactionHash) {
       try {
         const transactionHash = log.transactionHash;
-        const tx = await this.rpcClientService.execute(
-          chainId,
-          (client) => client.getTransaction({ hash: transactionHash }),
+        const tx = await this.rpcClientService.execute(chainId, (client) =>
+          client.getTransaction({ hash: transactionHash }),
         );
         if (tx.from) {
           const walletHolding = this.getOrCreateWalletHolding(
             tx.from,
             holdingsMap,
           );
-          walletHolding.createEtfCount = (walletHolding.createEtfCount ?? 0) + 1;
+          walletHolding.createEtfCount =
+            (walletHolding.createEtfCount ?? 0) + 1;
         }
       } catch (error) {
         this.logger.warn(
@@ -533,7 +548,9 @@ export class EventProcessingJob {
       );
 
       // Check if depositToken is authorized
-      const normalizedDepositToken = normalizeEthAddress(vaultConfig.depositToken);
+      const normalizedDepositToken = normalizeEthAddress(
+        vaultConfig.depositToken,
+      );
       const authorizedTokens = AUTORIZED_DEPOSIT_TOKENS[chainId] || [];
       const isAuthorized = authorizedTokens.some(
         (token) => normalizeEthAddress(token) === normalizedDepositToken,
@@ -604,7 +621,9 @@ export class EventProcessingJob {
     const etf = await this.etfModel.findOne({ vault: normalizedVault });
 
     if (!etf) {
-      this.logger.warn(`ETF not found for vault ${normalizedVault}, ignoring Rebalance event`);
+      this.logger.warn(
+        `ETF not found for vault ${normalizedVault}, ignoring Rebalance event`,
+      );
       return false;
     }
 
@@ -624,11 +643,12 @@ export class EventProcessingJob {
           holding.wallet,
           holdingsMap,
         );
-        walletHolding.rebalanceCount =
-          (walletHolding.rebalanceCount ?? 0) + 1;
+        walletHolding.rebalanceCount = (walletHolding.rebalanceCount ?? 0) + 1;
       }
     } catch (error) {
-      this.logger.error(`Error finding wallets for rebalance event in vault ${normalizedVault}`);
+      this.logger.error(
+        `Error finding wallets for rebalance event in vault ${normalizedVault}`,
+      );
     }
 
     // Update latestRebalanceDate on the ETF
@@ -658,7 +678,9 @@ export class EventProcessingJob {
     const etf = await this.etfModel.findOne({ vault: normalizedVault });
 
     if (!etf) {
-      this.logger.warn(`ETF not found for vault ${normalizedVault}, ignoring ParamsUpdated event`);
+      this.logger.warn(
+        `ETF not found for vault ${normalizedVault}, ignoring ParamsUpdated event`,
+      );
       return false;
     }
 
@@ -917,8 +939,12 @@ export class EventProcessingJob {
         : undefined,
       eventHeight: log.args.eventHeight?.toString(),
       etfNonce: log.args.etfNonce?.toString(),
-      shareToken: log.args.shareToken ? normalizeEthAddress(log.args.shareToken) : undefined,
-      depositToken: log.args.depositToken ? normalizeEthAddress(log.args.depositToken) : undefined,
+      shareToken: log.args.shareToken
+        ? normalizeEthAddress(log.args.shareToken)
+        : undefined,
+      depositToken: log.args.depositToken
+        ? normalizeEthAddress(log.args.depositToken)
+        : undefined,
       name: log.args.name ?? undefined,
       symbol: log.args.symbol ?? undefined,
     };
@@ -937,14 +963,14 @@ export class EventProcessingJob {
       chain: deposit.chain,
       symbol: deposit.symbol,
       decimals: deposit.decimals ?? 18,
-      etfVaultAddress: deposit.etfVaultAddress 
-        ? normalizeEthAddress(deposit.etfVaultAddress) 
+      etfVaultAddress: deposit.etfVaultAddress
+        ? normalizeEthAddress(deposit.etfVaultAddress)
         : deposit.symbol,
-      etfTokenAddress: deposit.etfTokenAddress 
+      etfTokenAddress: deposit.etfTokenAddress
         ? normalizeEthAddress(deposit.etfTokenAddress)
-        : deposit.etfVaultAddress 
-          ? normalizeEthAddress(deposit.etfVaultAddress) 
-          : deposit.symbol,
+        : deposit.etfVaultAddress
+        ? normalizeEthAddress(deposit.etfVaultAddress)
+        : deposit.symbol,
       amount: deposit.amount?.toString() ?? '0',
       amountUSD: deposit.amountUSD ?? 0,
     }));
@@ -1011,8 +1037,7 @@ export class EventProcessingJob {
     blockNumber: bigint,
     latestBlock: bigint,
   ): Promise<void> {
-    const savedToBlock =
-      blockNumber >= latestBlock ? latestBlock : blockNumber;
+    const savedToBlock = blockNumber >= latestBlock ? latestBlock : blockNumber;
 
     await this.observeEventsModel.findOneAndUpdate(
       { chain: Number(chainId) },
@@ -1042,33 +1067,51 @@ export class EventProcessingJob {
         // Process the event
         switch (log.eventName) {
           case 'Deposit':
-            eventProcessed = await this.processDepositEvent(log, chainId, holdingsMap);
+            eventProcessed = await this.processDepositEvent(
+              log,
+              chainId,
+              holdingsMap,
+            );
             // Save wallet holding if it was modified
             if (eventProcessed) {
               const depositUser = log.args.user;
               if (depositUser) {
                 const walletHolding = holdingsMap.get(depositUser);
                 if (walletHolding) {
-                  await this.saveWalletHolding(walletHolding, existingWalletSet);
+                  await this.saveWalletHolding(
+                    walletHolding,
+                    existingWalletSet,
+                  );
                 }
               }
             }
             break;
           case 'Redeem':
-            eventProcessed = await this.processRedeemEvent(log, chainId, holdingsMap);
+            eventProcessed = await this.processRedeemEvent(
+              log,
+              chainId,
+              holdingsMap,
+            );
             // Save wallet holding if it was modified
             if (eventProcessed) {
               const redeemUser = log.args.user;
               if (redeemUser) {
                 const walletHolding = holdingsMap.get(redeemUser);
                 if (walletHolding) {
-                  await this.saveWalletHolding(walletHolding, existingWalletSet);
+                  await this.saveWalletHolding(
+                    walletHolding,
+                    existingWalletSet,
+                  );
                 }
               }
             }
             break;
           case 'ETFCreated':
-            eventProcessed = await this.processETFCreatedEvent(log, chainId, holdingsMap);
+            eventProcessed = await this.processETFCreatedEvent(
+              log,
+              chainId,
+              holdingsMap,
+            );
             // Save wallet holdings that were modified (if any)
             if (eventProcessed && log.transactionHash) {
               try {
@@ -1080,7 +1123,10 @@ export class EventProcessingJob {
                 if (tx.from) {
                   const walletHolding = holdingsMap.get(tx.from);
                   if (walletHolding) {
-                    await this.saveWalletHolding(walletHolding, existingWalletSet);
+                    await this.saveWalletHolding(
+                      walletHolding,
+                      existingWalletSet,
+                    );
                   }
                 }
               } catch (error) {
@@ -1089,7 +1135,11 @@ export class EventProcessingJob {
             }
             break;
           case 'Rebalance':
-            eventProcessed = await this.processRebalanceEvent(log, chainId, holdingsMap);
+            eventProcessed = await this.processRebalanceEvent(
+              log,
+              chainId,
+              holdingsMap,
+            );
             // Save all wallet holdings that were modified
             if (eventProcessed) {
               const { vault } = log.args;
@@ -1106,7 +1156,10 @@ export class EventProcessingJob {
                   for (const holding of walletHoldings) {
                     const walletHolding = holdingsMap.get(holding.wallet);
                     if (walletHolding) {
-                      await this.saveWalletHolding(walletHolding, existingWalletSet);
+                      await this.saveWalletHolding(
+                        walletHolding,
+                        existingWalletSet,
+                      );
                     }
                   }
                 } catch (error) {
@@ -1291,13 +1344,18 @@ export class EventProcessingJob {
 
         const nbBlocksToRewind = twoMinutesMs / blockTimeOnTheChain;
 
-        this.logger.debug(`Rewinding last observed height by ${nbBlocksToRewind} blocks on chain ${chainId} from ${lastObservedEthHeight} to ${lastObservedEthHeight > nbBlocksToRewind ? lastObservedEthHeight - nbBlocksToRewind : 0n}`);
+        this.logger.debug(
+          `Rewinding last observed height by ${nbBlocksToRewind} blocks on chain ${chainId} from ${lastObservedEthHeight} to ${
+            lastObservedEthHeight > nbBlocksToRewind
+              ? lastObservedEthHeight - nbBlocksToRewind
+              : 0n
+          }`,
+        );
         // rewind the last observed height
         lastObservedEthHeight =
           lastObservedEthHeight > nbBlocksToRewind
             ? lastObservedEthHeight - nbBlocksToRewind
             : 0n;
-        
       }
     }
 
@@ -1307,7 +1365,9 @@ export class EventProcessingJob {
       latestEventNonce,
     );
 
-    this.logger.debug(`Researching ${noncesResearched.length} nonces on chain ${chainId}`);
+    this.logger.debug(
+      `Researching ${noncesResearched.length} nonces on chain ${chainId}`,
+    );
 
     const contractAddress = ETF_CONTRACT_ADDRS[chainId] as `0x${string}`;
 
@@ -1325,7 +1385,10 @@ export class EventProcessingJob {
     } catch (error) {
       console.log(error);
       this.logger.error(`Failed to get events on chain ${chainId}`);
-      return { lastObservedEthHeight, error: new Error('Failed to get events') };
+      return {
+        lastObservedEthHeight,
+        error: new Error('Failed to get events'),
+      };
     }
 
     const newEvents = this.filterEvents(events, lastObservedEventNonce);
@@ -1341,7 +1404,9 @@ export class EventProcessingJob {
       return { lastObservedEthHeight: targetHeight };
     }
 
-    this.logger.log(`Processing ${newEvents.length} new events on chain ${chainId}`);
+    this.logger.log(
+      `Processing ${newEvents.length} new events on chain ${chainId}`,
+    );
 
     // Check for missed events (nonce gap detection)
     const firstEventNonce =
@@ -1440,9 +1505,7 @@ export class EventProcessingJob {
    * Observe and process lending events for a specific chain
    * Following Go code pattern exactly
    */
-  private async observeEvents(
-    chainId: ChainId,
-  ): Promise<void> {
+  private async observeEvents(chainId: ChainId): Promise<void> {
     if (DEFAULT_START_BLOCKS[chainId] == 0n) return;
 
     // Get or create observe progress for this chain
@@ -1461,9 +1524,7 @@ export class EventProcessingJob {
     let lastObservedEthHeight: bigint;
     if (observeProgress) {
       // Use saved progress
-      lastObservedEthHeight = BigInt(
-        observeProgress.lastBlockNumber ?? '0',
-      );
+      lastObservedEthHeight = BigInt(observeProgress.lastBlockNumber ?? '0');
     } else {
       // First time: use last event block or default start block
       lastObservedEthHeight = lastEventObserved?.blockNumber
@@ -1474,9 +1535,8 @@ export class EventProcessingJob {
     // Get latest block number with rate limiting
     let latestHeight: bigint;
     try {
-      latestHeight = await this.rpcClientService.execute(
-        chainId,
-        (client) => client.getBlockNumber(),
+      latestHeight = await this.rpcClientService.execute(chainId, (client) =>
+        client.getBlockNumber(),
       );
     } catch (error) {
       this.logger.error(`Failed to get latest height on chain ${chainId}`);
@@ -1501,7 +1561,7 @@ export class EventProcessingJob {
 
     // Detect first launch (no observeProgress exists)
     const isFirstLaunch = !observeProgress;
-    
+
     if (isFirstLaunch) {
       this.logger.log(
         `First launch detected for chain ${chainId}. Starting full synchronization from block ${lastObservedEthHeight} to ${targetHeight}`,
@@ -1517,7 +1577,10 @@ export class EventProcessingJob {
     if (isFirstLaunch) {
       // Full sync: continue until we reach targetHeight
       while (lastObservedEthHeight < targetHeight) {
-        if (targetHeightForSync > lastObservedEthHeight + defaultBlocksToSearch) {
+        if (
+          targetHeightForSync >
+          lastObservedEthHeight + defaultBlocksToSearch
+        ) {
           targetHeightForSync = lastObservedEthHeight + defaultBlocksToSearch;
         }
 
@@ -1547,34 +1610,37 @@ export class EventProcessingJob {
         }
 
         lastObservedEthHeight = result.lastObservedEthHeight;
-        
+
         // Check if we've reached the target
         if (lastObservedEthHeight >= targetHeight) {
           break;
         }
-        
+
         targetHeightForSync = targetHeightForSync + defaultBlocksToSearch;
-        
+
         // Log progress for first launch
         const totalBlocksToSync = targetHeight - DEFAULT_START_BLOCKS[chainId];
         if (totalBlocksToSync > 0n) {
           const progressPercent = Number(
             ((lastObservedEthHeight - DEFAULT_START_BLOCKS[chainId]) * 100n) /
-            totalBlocksToSync,
+              totalBlocksToSync,
           ).toFixed(2);
           this.logger.log(
             `First launch sync progress for chain ${chainId}: ${progressPercent}% (block ${lastObservedEthHeight}/${targetHeight})`,
           );
         }
       }
-      
+
       this.logger.log(
         `First launch full synchronization completed for chain ${chainId}. Synced from block ${DEFAULT_START_BLOCKS[chainId]} to ${lastObservedEthHeight}`,
       );
     } else {
       // Normal sync: continue until we reach targetHeight (rate limiting handles RPC calls)
       while (lastObservedEthHeight < targetHeight) {
-        if (targetHeightForSync > lastObservedEthHeight + defaultBlocksToSearch) {
+        if (
+          targetHeightForSync >
+          lastObservedEthHeight + defaultBlocksToSearch
+        ) {
           targetHeightForSync = lastObservedEthHeight + defaultBlocksToSearch;
         }
 
@@ -1604,12 +1670,12 @@ export class EventProcessingJob {
         }
 
         lastObservedEthHeight = result.lastObservedEthHeight;
-        
+
         // Check if we've reached the target
         if (lastObservedEthHeight >= targetHeight) {
           break;
         }
-        
+
         targetHeightForSync = targetHeightForSync + defaultBlocksToSearch;
       }
     }
@@ -1649,9 +1715,7 @@ export class EventProcessingJob {
    * Initialize volumes for all ETFs on a chain that don't have volumes yet
    */
   private async initializeVolumesForChain(chainId: ChainId): Promise<void> {
-    this.logger.log(
-      `Initializing volumes for all ETFs on chain ${chainId}...`,
-    );
+    this.logger.log(`Initializing volumes for all ETFs on chain ${chainId}...`);
 
     try {
       // Get all ETFs for this chain
@@ -1661,7 +1725,7 @@ export class EventProcessingJob {
       for (const etf of etfs) {
         try {
           const normalizedVault = normalizeEthAddress(etf.vault);
-          
+
           // Check if volume document already exists
           const volumeDoc = await this.etfVolumeModel.findOne({
             vault: normalizedVault,
