@@ -3,10 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { MasterOnly } from 'src/common/decorators/master-only.decorator';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import {
-  ChainlinkDataFeed,
-  ChainlinkDataFeedDocument,
-} from 'src/models/chainlink-data-feed.schema';
+import { ChainlinkDataFeed, ChainlinkDataFeedDocument } from 'src/models';
 
 const ETHEREUM_CHAIN_ID = 1;
 const ARBITRUM_CHAIN_ID = 42161;
@@ -169,10 +166,7 @@ export class ChainlinkSyncJob {
         `Chainlink sync completed for chain ${chainId}: ${addedCount} added, ${skippedCount} updated`,
       );
     } catch (error) {
-      this.logger.error(
-        `Error processing feeds for chain ${chainId}:`,
-        error,
-      );
+      this.logger.error(`Error processing feeds for chain ${chainId}:`, error);
     }
   }
 
