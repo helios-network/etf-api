@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { CacheService } from '../../infrastructure/cache/cache.service';
-import { WalletHolding, WalletHoldingDocument } from '../../models/wallet-holding.schema';
-import { ETF, ETFDocument } from '../../models/etf.schema';
-import { WalletHoldingUtilsService } from '../../services/wallet-holding-utils.service';
-import { TRANSACTION_POINTS } from '../../constants/transaction-points';
-import { normalizeEthAddress } from '../../common/utils/eip55';
+import { CacheService } from 'src/infrastructure/cache/cache.service';
+import {
+  WalletHolding,
+  WalletHoldingDocument,
+  ETF,
+  ETFDocument,
+} from 'src/models';
+import { WalletHoldingUtilsService } from 'src/services';
+import { TRANSACTION_POINTS } from 'src/constants/transaction-points';
+import { normalizeEthAddress } from 'src/common/utils/eip55';
 
 @Injectable()
 export class LeaderBoardService {
@@ -79,7 +83,9 @@ export class LeaderBoardService {
 
         try {
           const normalizedVaultAddress = normalizeEthAddress(vaultAddress);
-          const etf = await this.etfModel.findOne({ vault: normalizedVaultAddress });
+          const etf = await this.etfModel.findOne({
+            vault: normalizedVaultAddress,
+          });
           if (!etf || !etf.sharePrice || etf.sharePrice <= 0) {
             continue;
           }
@@ -119,7 +125,12 @@ export class LeaderBoardService {
     return await this.cacheService.wrap(
       cacheKey,
       async () => {
-        return await this.computeLeaderBoard(pageNum, limitNum, sortByField, orderField);
+        return await this.computeLeaderBoard(
+          pageNum,
+          limitNum,
+          sortByField,
+          orderField,
+        );
       },
       {
         namespace: 'leaderboard',
@@ -198,8 +209,8 @@ export class LeaderBoardService {
             a.volumeTradedUSD > b.volumeTradedUSD
               ? 1
               : a.volumeTradedUSD < b.volumeTradedUSD
-                ? -1
-                : 0;
+              ? -1
+              : 0;
           break;
         case 'transactions':
           comparison = a.transactionsPerformed - b.transactionsPerformed;
@@ -210,8 +221,8 @@ export class LeaderBoardService {
             a.totalPoints > b.totalPoints
               ? 1
               : a.totalPoints < b.totalPoints
-                ? -1
-                : 0;
+              ? -1
+              : 0;
           break;
       }
 
@@ -233,24 +244,18 @@ export class LeaderBoardService {
     // Ensure all numeric values are valid and properly formatted
     const formattedEntries = paginatedEntries.map((entry) => {
       // Ensure volumeTradedUSD is always a valid number string
-      const volumeTradedUSD = 
-        entry.volumeTradedUSD != null && 
-        !isNaN(entry.volumeTradedUSD) 
-          ? entry.volumeTradedUSD.toString() 
+      const volumeTradedUSD =
+        entry.volumeTradedUSD != null && !isNaN(entry.volumeTradedUSD)
+          ? entry.volumeTradedUSD.toString()
           : '0';
-      
+
       // Ensure tvl is always a valid number
-      const tvl = 
-        entry.tvl != null && 
-        !isNaN(entry.tvl) 
-          ? entry.tvl 
-          : 0;
-      
+      const tvl = entry.tvl != null && !isNaN(entry.tvl) ? entry.tvl : 0;
+
       // Ensure avgTransactionSize is always a valid number string
-      const avgTransactionSize = 
-        entry.avgTransactionSize != null && 
-        !isNaN(entry.avgTransactionSize) 
-          ? entry.avgTransactionSize.toString() 
+      const avgTransactionSize =
+        entry.avgTransactionSize != null && !isNaN(entry.avgTransactionSize)
+          ? entry.avgTransactionSize.toString()
           : '0';
 
       return {
@@ -262,7 +267,9 @@ export class LeaderBoardService {
         tvl,
         avgTransactionSize,
         pointsPerTransaction: entry.pointsPerTransaction.toString(),
-        lastActivity: entry.lastActivity ? entry.lastActivity.toISOString() : null,
+        lastActivity: entry.lastActivity
+          ? entry.lastActivity.toISOString()
+          : null,
         transactionCounts: entry.transactionCounts,
         pointsByType: entry.pointsByType,
         totalPoints: entry.totalPoints,
@@ -286,9 +293,7 @@ export class LeaderBoardService {
   /**
    * Process a batch of wallet holdings and calculate their leaderboard metrics
    */
-  private async processWalletBatch(
-    walletHoldings: any[],
-  ): Promise<
+  private async processWalletBatch(walletHoldings: any[]): Promise<
     Array<{
       rank: number;
       address: string;
@@ -317,24 +322,27 @@ export class LeaderBoardService {
     // Calculate leaderboard entries with TVL for this batch
     const entriesPromises = walletHoldings.map(async (holding) => {
       // Ensure volumeTradedUSD is always a valid number
-      let volumeTradedUSD = 
-        holding.volumeTradedUSD != null && 
-        !isNaN(Number(holding.volumeTradedUSD)) && 
+      let volumeTradedUSD =
+        holding.volumeTradedUSD != null &&
+        !isNaN(Number(holding.volumeTradedUSD)) &&
         Number(holding.volumeTradedUSD) > 0
-          ? Number(holding.volumeTradedUSD) 
+          ? Number(holding.volumeTradedUSD)
           : 0;
-      
+
       // If volume is 0, try to calculate it from deposits
-      if (volumeTradedUSD === 0 && holding.deposits && holding.deposits.length > 0) {
+      if (
+        volumeTradedUSD === 0 &&
+        holding.deposits &&
+        holding.deposits.length > 0
+      ) {
         try {
-          volumeTradedUSD = await this.calculateVolumeFromDeposits(holding.deposits);
+          volumeTradedUSD = await this.calculateVolumeFromDeposits(
+            holding.deposits,
+          );
           // Optionally update the wallet in background (don't await)
           if (volumeTradedUSD > 0) {
             this.walletHoldingModel
-              .updateOne(
-                { _id: holding._id },
-                { $set: { volumeTradedUSD } },
-              )
+              .updateOne({ _id: holding._id }, { $set: { volumeTradedUSD } })
               .catch((err) =>
                 this.logger.error(
                   `Error updating volumeTradedUSD for wallet ${holding.wallet}:`,
@@ -349,14 +357,15 @@ export class LeaderBoardService {
           );
         }
       }
-      
+
       // Get transaction counts
       const createEtfCount = holding.createEtfCount ?? 0;
       const depositCount = holding.depositCount ?? 0;
       const redeemCount = holding.redeemCount ?? 0;
       const rebalanceCount = holding.rebalanceCount ?? 0;
-      
-      const transactionsPerformed = createEtfCount + depositCount + redeemCount + rebalanceCount;
+
+      const transactionsPerformed =
+        createEtfCount + depositCount + redeemCount + rebalanceCount;
 
       // Calculate points by type
       const pointsByType = {
@@ -366,7 +375,11 @@ export class LeaderBoardService {
         rebalance: rebalanceCount * TRANSACTION_POINTS.REBALANCE,
       };
 
-      const totalPoints = pointsByType.createEtf + pointsByType.deposit + pointsByType.redeem + pointsByType.rebalance;
+      const totalPoints =
+        pointsByType.createEtf +
+        pointsByType.deposit +
+        pointsByType.redeem +
+        pointsByType.rebalance;
 
       // Calculate average transaction size
       const avgTransactionSize =
@@ -379,11 +392,15 @@ export class LeaderBoardService {
           : 0n;
 
       // Calculate TVL if not set or if deposits exist
-      let tvl = 
+      let tvl =
         holding.tvl != null && !isNaN(Number(holding.tvl))
           ? Number(holding.tvl)
           : 0;
-      if ((!tvl || tvl === 0) && holding.deposits && holding.deposits.length > 0) {
+      if (
+        (!tvl || tvl === 0) &&
+        holding.deposits &&
+        holding.deposits.length > 0
+      ) {
         try {
           // Calculate TVL on the fly (function now fetches ETFs from DB using deposit vault addresses)
           tvl = await this.walletHoldingUtils.calculateWalletTVL(
@@ -393,10 +410,16 @@ export class LeaderBoardService {
           this.walletHoldingModel
             .updateOne({ _id: holding._id }, { $set: { tvl } })
             .catch((err) =>
-              this.logger.error(`Error updating TVL for wallet ${holding.wallet}:`, err),
+              this.logger.error(
+                `Error updating TVL for wallet ${holding.wallet}:`,
+                err,
+              ),
             );
         } catch (error) {
-          this.logger.error(`Error calculating TVL for wallet ${holding.wallet}:`, error);
+          this.logger.error(
+            `Error calculating TVL for wallet ${holding.wallet}:`,
+            error,
+          );
         }
       }
 

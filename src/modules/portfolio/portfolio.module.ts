@@ -1,12 +1,8 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { WalletHolding, WalletHoldingSchema, ETF, ETFSchema } from 'src/models';
 import { PortfolioController } from './portfolio.controller';
 import { PortfolioService } from './portfolio.service';
-import {
-  WalletHolding,
-  WalletHoldingSchema,
-} from '../../models/wallet-holding.schema';
-import { ETF, ETFSchema } from '../../models/etf.schema';
 
 @Module({
   imports: [
@@ -20,4 +16,3 @@ import { ETF, ETFSchema } from '../../models/etf.schema';
   exports: [PortfolioService],
 })
 export class PortfolioModule {}
-
