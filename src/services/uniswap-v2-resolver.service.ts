@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { parseAbi, encodeAbiParameters } from 'viem';
-import { ASSETS_ADDRS, UNISWAP_V2_FACTORY_ADDRS, UNISWAP_V2_ROUTER_ADDRS } from '../constants';
+import {
+  ASSETS_ADDRS,
+  UNISWAP_V2_FACTORY_ADDRS,
+  UNISWAP_V2_ROUTER_ADDRS,
+} from '../constants';
 import { V2PoolInfo } from '../types/etf-verify.types';
 import { RpcClientService } from './rpc-client/rpc-client.service';
 import { ChainId } from '../config/web3';
@@ -32,7 +36,13 @@ const V2_ROUTER_ABI = parseAbi([
 export class UniswapV2ResolverService {
   private readonly logger = new Logger(UniswapV2ResolverService.name);
 
+  private pathCache = new Map<string, V2PoolInfo>();
+
   constructor(private readonly rpcClientService: RpcClientService) {}
+
+  resetCache() {
+    this.pathCache.clear();
+  }
   /**
    * Check if a V2 pool exists between two tokens
    */
@@ -53,13 +63,19 @@ export class UniswapV2ResolverService {
           }),
       );
 
-      if (pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000') {
+      if (
+        pairAddress &&
+        pairAddress !== '0x0000000000000000000000000000000000000000'
+      ) {
         return { exists: true, pairAddress: pairAddress as `0x${string}` };
       }
 
       return { exists: false, pairAddress: null };
     } catch (error) {
-      this.logger.debug(`Error checking V2 pool for ${tokenA}/${tokenB}:`, error);
+      this.logger.debug(
+        `Error checking V2 pool for ${tokenA}/${tokenB}:`,
+        error,
+      );
       return { exists: false, pairAddress: null };
     }
   }
@@ -106,7 +122,11 @@ export class UniswapV2ResolverService {
     tokenBPriceUSD: number | null,
   ): Promise<number> {
     try {
-      const { exists, pairAddress } = await this.checkV2Pool(chainId, tokenA, tokenB);
+      const { exists, pairAddress } = await this.checkV2Pool(
+        chainId,
+        tokenA,
+        tokenB,
+      );
       if (!exists || !pairAddress) {
         return 0;
       }
@@ -119,35 +139,34 @@ export class UniswapV2ResolverService {
 
       // Get token0 and token1 to determine order
       const [token0, token1] = await Promise.all([
-        this.rpcClientService.execute(
-          chainId as ChainId,
-          (client) =>
-            client.readContract({
-              address: pairAddress,
-              abi: V2_PAIR_ABI,
-              functionName: 'token0',
-            }),
+        this.rpcClientService.execute(chainId as ChainId, (client) =>
+          client.readContract({
+            address: pairAddress,
+            abi: V2_PAIR_ABI,
+            functionName: 'token0',
+          }),
         ),
-        this.rpcClientService.execute(
-          chainId as ChainId,
-          (client) =>
-            client.readContract({
-              address: pairAddress,
-              abi: V2_PAIR_ABI,
-              functionName: 'token1',
-            }),
+        this.rpcClientService.execute(chainId as ChainId, (client) =>
+          client.readContract({
+            address: pairAddress,
+            abi: V2_PAIR_ABI,
+            functionName: 'token1',
+          }),
         ),
       ]);
 
-      const isTokenAFirst = (token0 as string).toLowerCase() === tokenA.toLowerCase();
+      const isTokenAFirst =
+        (token0 as string).toLowerCase() === tokenA.toLowerCase();
       const reserveA = isTokenAFirst ? reserves.reserve0 : reserves.reserve1;
       const reserveB = isTokenAFirst ? reserves.reserve1 : reserves.reserve0;
 
       // Calculate USD value
       // If we have prices, use them directly
       if (tokenAPriceUSD && tokenBPriceUSD) {
-        const valueA = Number(reserveA) / 10 ** tokenADecimals * tokenAPriceUSD;
-        const valueB = Number(reserveB) / 10 ** tokenBDecimals * tokenBPriceUSD;
+        const valueA =
+          (Number(reserveA) / 10 ** tokenADecimals) * tokenAPriceUSD;
+        const valueB =
+          (Number(reserveB) / 10 ** tokenBDecimals) * tokenBPriceUSD;
         return valueA + valueB;
       }
 
@@ -174,16 +193,21 @@ export class UniswapV2ResolverService {
         // If we have price for tokenB, calculate liquidity
         if (tokenBPriceUSD) {
           const valueA =
-            (Number(reserveA) / 10 ** tokenADecimals) * priceRatio * tokenBPriceUSD;
-          const valueB = (Number(reserveB) / 10 ** tokenBDecimals) * tokenBPriceUSD;
+            (Number(reserveA) / 10 ** tokenADecimals) *
+            priceRatio *
+            tokenBPriceUSD;
+          const valueB =
+            (Number(reserveB) / 10 ** tokenBDecimals) * tokenBPriceUSD;
           return valueA + valueB;
         }
 
         // If we have price for tokenA
         if (tokenAPriceUSD) {
-          const valueA = (Number(reserveA) / 10 ** tokenADecimals) * tokenAPriceUSD;
+          const valueA =
+            (Number(reserveA) / 10 ** tokenADecimals) * tokenAPriceUSD;
           const valueB =
-            (Number(reserveB) / 10 ** tokenBDecimals / priceRatio) * tokenAPriceUSD;
+            (Number(reserveB) / 10 ** tokenBDecimals / priceRatio) *
+            tokenAPriceUSD;
           return valueA + valueB;
         }
 
@@ -241,10 +265,37 @@ export class UniswapV2ResolverService {
     }
   }
 
+  async findV2Path(
+    chainId: number,
+    depositToken: `0x${string}`,
+    targetToken: `0x${string}`,
+    depositTokenDecimals: number,
+    targetTokenDecimals: number,
+    depositTokenPriceUSD: number | null,
+    targetTokenPriceUSD: number | null,
+  ): Promise<V2PoolInfo> {
+    const cacheKey = `${chainId}-${depositToken}-${targetToken}-${depositTokenDecimals}-${targetTokenDecimals}-${depositTokenPriceUSD}-${targetTokenPriceUSD}`;
+    if (this.pathCache.has(cacheKey)) {
+      return this.pathCache.get(cacheKey)!;
+    }
+
+    const path = await this.findV2PathUncached(
+      chainId,
+      depositToken,
+      targetToken,
+      depositTokenDecimals,
+      targetTokenDecimals,
+      depositTokenPriceUSD,
+      targetTokenPriceUSD,
+    );
+    this.pathCache.set(cacheKey, path);
+    return path;
+  }
+
   /**
    * Find V2 path from depositToken to targetToken (1 or 2 hops max)
    */
-  async findV2Path(
+  async findV2PathUncached(
     chainId: number,
     depositToken: `0x${string}`,
     targetToken: `0x${string}`,
@@ -313,7 +364,10 @@ export class UniswapV2ResolverService {
     );
 
     // Take minimum liquidity of the path
-    const twoHopLiquidity = Math.min(depositToWethLiquidity, wethToTargetLiquidity);
+    const twoHopLiquidity = Math.min(
+      depositToWethLiquidity,
+      wethToTargetLiquidity,
+    );
 
     if (twoHopLiquidity >= 1000) {
       return {
