@@ -39,10 +39,13 @@ const V3_QUOTER_ABI = parseAbi([
 @Injectable()
 export class UniswapV3ResolverService {
   private readonly logger = new Logger(UniswapV3ResolverService.name);
+  private pathCache = new Map<string, V3PathInfo>();
 
-  constructor(
-    private readonly rpcClientService: RpcClientService,
-  ) {}
+  constructor(private readonly rpcClientService: RpcClientService) {}
+
+  resetCache() {
+    this.pathCache.clear();
+  }
   /**
    * Check if a V3 pool exists for a given fee tier
    */
@@ -64,13 +67,19 @@ export class UniswapV3ResolverService {
           }),
       );
 
-      if (poolAddress && poolAddress !== '0x0000000000000000000000000000000000000000') {
+      if (
+        poolAddress &&
+        poolAddress !== '0x0000000000000000000000000000000000000000'
+      ) {
         return { exists: true, poolAddress: poolAddress as `0x${string}` };
       }
 
       return { exists: false, poolAddress: null };
     } catch (error) {
-      this.logger.debug(`Error checking V3 pool for ${tokenA}/${tokenB} fee ${fee}:`, error);
+      this.logger.debug(
+        `Error checking V3 pool for ${tokenA}/${tokenB} fee ${fee}:`,
+        error,
+      );
       return { exists: false, poolAddress: null };
     }
   }
@@ -95,7 +104,10 @@ export class UniswapV3ResolverService {
 
       return liquidity as bigint;
     } catch (error) {
-      this.logger.debug(`Error getting V3 liquidity for ${poolAddress}:`, error);
+      this.logger.debug(
+        `Error getting V3 liquidity for ${poolAddress}:`,
+        error,
+      );
       return null;
     }
   }
@@ -121,11 +133,11 @@ export class UniswapV3ResolverService {
         tokenB,
         fee,
       );
-  
+
       if (!exists || !poolAddress) {
         return [0, '', null];
       }
-  
+
       // Read token0/token1 from pool
       const [token0, token1] = await Promise.all([
         this.rpcClientService.execute(
@@ -147,12 +159,12 @@ export class UniswapV3ResolverService {
             }) as Promise<`0x${string}`>,
         ),
       ]);
-  
+
       // Minimal ERC20 ABI
       const ERC20_ABI = parseAbi([
         'function balanceOf(address) view returns (uint256)',
       ]);
-  
+
       // Read balances of token0/token1 held by pool
       const [balance0Raw, balance1Raw] = await Promise.all([
         this.rpcClientService.execute(
@@ -176,23 +188,23 @@ export class UniswapV3ResolverService {
             }) as Promise<bigint>,
         ),
       ]);
-  
+
       // Resolve decimals for token0/token1 using provided decimals for tokenA/tokenB
       const decimals0 =
         token0.toLowerCase() === tokenA.toLowerCase()
           ? tokenADecimals
           : tokenBDecimals;
-  
+
       const decimals1 =
         token1.toLowerCase() === tokenA.toLowerCase()
           ? tokenADecimals
           : tokenBDecimals;
-  
+
       // Convert balances safely (string -> number)
       // (Pour une TVL énorme, number peut perdre un peu de précision, mais évite overflow direct)
       const amount0 = Number(ethers.formatUnits(balance0Raw, decimals0));
       const amount1 = Number(ethers.formatUnits(balance1Raw, decimals1));
-  
+
       // Read slot0 to get tick
       const slot0 = await this.rpcClientService.execute(
         chainId as ChainId,
@@ -203,30 +215,31 @@ export class UniswapV3ResolverService {
             functionName: 'slot0',
           }),
       );
-  
+
       // slot0: [sqrtPriceX96, tick, ...]
       const tick = Number(slot0[1]);
-  
+
       // Uniswap V3 price from tick:
       // priceToken1PerToken0 = (1.0001^tick) * 10^(decimals0 - decimals1)
       const priceToken1PerToken0 =
         Math.pow(1.0001, tick) * Math.pow(10, decimals0 - decimals1);
-  
+
       // Determine mapping tokenA/tokenB to token0/token1
       const token0IsTokenA = token0.toLowerCase() === tokenA.toLowerCase();
       const token1IsTokenA = token1.toLowerCase() === tokenA.toLowerCase();
-  
+
       let calculatedTokenBPriceUSD: number | null = null;
-  
+
       // If both prices known: compute directly
       if (tokenAPriceUSD != null && tokenBPriceUSD != null) {
         const token0PriceUSD = token0IsTokenA ? tokenAPriceUSD : tokenBPriceUSD;
         const token1PriceUSD = token1IsTokenA ? tokenAPriceUSD : tokenBPriceUSD;
-  
-        const liquidityUSD = amount0 * token0PriceUSD + amount1 * token1PriceUSD;
+
+        const liquidityUSD =
+          amount0 * token0PriceUSD + amount1 * token1PriceUSD;
         return [liquidityUSD, poolAddress, null];
       }
-  
+
       // If only tokenA price known: infer tokenB price using pool price
       if (tokenAPriceUSD != null && tokenBPriceUSD == null) {
         // priceToken1PerToken0 tells: 1 token0 = priceToken1PerToken0 token1
@@ -247,18 +260,23 @@ export class UniswapV3ResolverService {
           // tokenA == token1, tokenB == token0
           calculatedTokenBPriceUSD = tokenAPriceUSD * priceToken1PerToken0;
         }
-  
-        const token0PriceUSD = token0IsTokenA ? tokenAPriceUSD : calculatedTokenBPriceUSD;
-        const token1PriceUSD = token1IsTokenA ? tokenAPriceUSD : calculatedTokenBPriceUSD;
-  
-        const liquidityUSD = amount0 * token0PriceUSD + amount1 * token1PriceUSD;
+
+        const token0PriceUSD = token0IsTokenA
+          ? tokenAPriceUSD
+          : calculatedTokenBPriceUSD;
+        const token1PriceUSD = token1IsTokenA
+          ? tokenAPriceUSD
+          : calculatedTokenBPriceUSD;
+
+        const liquidityUSD =
+          amount0 * token0PriceUSD + amount1 * token1PriceUSD;
         return [liquidityUSD, poolAddress, calculatedTokenBPriceUSD];
       }
-  
+
       // If only tokenB price known: infer tokenA price then compute liquidity, but we only return tokenB inferred (null here)
       if (tokenAPriceUSD == null && tokenBPriceUSD != null) {
         let calculatedTokenAPriceUSD: number;
-  
+
         if (token0IsTokenA) {
           // tokenA == token0, tokenB == token1
           // token1USD = token0USD / X  => token0USD = token1USD * X
@@ -268,14 +286,19 @@ export class UniswapV3ResolverService {
           // token0USD = token1USD * X  => token1USD = token0USD / X
           calculatedTokenAPriceUSD = tokenBPriceUSD / priceToken1PerToken0;
         }
-  
-        const token0PriceUSD = token0IsTokenA ? calculatedTokenAPriceUSD : tokenBPriceUSD;
-        const token1PriceUSD = token1IsTokenA ? calculatedTokenAPriceUSD : tokenBPriceUSD;
-  
-        const liquidityUSD = amount0 * token0PriceUSD + amount1 * token1PriceUSD;
+
+        const token0PriceUSD = token0IsTokenA
+          ? calculatedTokenAPriceUSD
+          : tokenBPriceUSD;
+        const token1PriceUSD = token1IsTokenA
+          ? calculatedTokenAPriceUSD
+          : tokenBPriceUSD;
+
+        const liquidityUSD =
+          amount0 * token0PriceUSD + amount1 * token1PriceUSD;
         return [liquidityUSD, poolAddress, null];
       }
-  
+
       // No prices known
       return [0, poolAddress, null];
     } catch (err) {
@@ -308,19 +331,22 @@ export class UniswapV3ResolverService {
     };
 
     for (const fee of UNISWAP_V3_FEES) {
-      const [liquidity, poolAddress, calculatedTokenBPriceUSD] = await this.calculateV3LiquidityUSD(
-        chainId,
-        tokenA,
-        tokenB,
-        fee,
-        tokenADecimals,
-        tokenBDecimals,
-        tokenAPriceUSD,
-        tokenBPriceUSD,
-      );
+      const [liquidity, poolAddress, calculatedTokenBPriceUSD] =
+        await this.calculateV3LiquidityUSD(
+          chainId,
+          tokenA,
+          tokenB,
+          fee,
+          tokenADecimals,
+          tokenBDecimals,
+          tokenAPriceUSD,
+          tokenBPriceUSD,
+        );
       // Note: calculatedTokenBPriceUSD is returned but not used here
 
-      this.logger.debug(`findBestV3Pool V3 liquidity for ${tokenA}/${tokenB} fee ${fee}: ${liquidity} ${poolAddress}`);
+      this.logger.debug(
+        `findBestV3Pool V3 liquidity for ${tokenA}/${tokenB} fee ${fee}: ${liquidity} ${poolAddress}`,
+      );
 
       if (liquidity > bestPool.liquidityUSD) {
         bestPool = {
@@ -330,23 +356,52 @@ export class UniswapV3ResolverService {
           token0: tokenA,
           token1: tokenB,
           poolAddress,
-          calculatedTokenBPriceUSD
+          calculatedTokenBPriceUSD,
         };
       }
     }
 
     if (bestPool.liquidityUSD > 0) {
-      this.logger.debug(`findBestV3Pool Best V3 pool for ${tokenA}/${tokenB} fee ${bestPool.fee} with liquidity ${bestPool.liquidityUSD} ${bestPool.poolAddress}`);
+      this.logger.debug(
+        `findBestV3Pool Best V3 pool for ${tokenA}/${tokenB} fee ${bestPool.fee} with liquidity ${bestPool.liquidityUSD} ${bestPool.poolAddress}`,
+      );
     }
 
     return bestPool;
+  }
+
+  async findV3Path(
+    chainId: number,
+    depositToken: `0x${string}`,
+    targetToken: `0x${string}`,
+    depositTokenDecimals: number,
+    targetTokenDecimals: number,
+    depositTokenPriceUSD: number | null,
+    targetTokenPriceUSD: number | null,
+  ): Promise<V3PathInfo> {
+    const cacheKey = `${chainId}-${depositToken}-${targetToken}-${depositTokenDecimals}-${targetTokenDecimals}-${depositTokenPriceUSD}-${targetTokenPriceUSD}`;
+    if (this.pathCache.has(cacheKey)) {
+      return this.pathCache.get(cacheKey)!;
+    }
+
+    const path = await this.findV3PathUncached(
+      chainId,
+      depositToken,
+      targetToken,
+      depositTokenDecimals,
+      targetTokenDecimals,
+      depositTokenPriceUSD,
+      targetTokenPriceUSD,
+    );
+    this.pathCache.set(cacheKey, path);
+    return path;
   }
 
   /**
    * Find V3 path from depositToken to targetToken (direct or via WETH)
    * Similar to findV2Path but for V3 pools
    */
-  async findV3Path(
+  async findV3PathUncached(
     chainId: number,
     depositToken: `0x${string}`,
     targetToken: `0x${string}`,
@@ -447,6 +502,9 @@ export class UniswapV3ResolverService {
       );
     }
     // Direct path: token0 + fee + token1
-    return encodePacked(['address', 'uint24', 'address'], [token0, fee, token1]);
+    return encodePacked(
+      ['address', 'uint24', 'address'],
+      [token0, fee, token1],
+    );
   }
 }

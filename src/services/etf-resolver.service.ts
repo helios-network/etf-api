@@ -25,6 +25,11 @@ export class EtfResolverService {
     private readonly rpcClientService: RpcClientService,
   ) {}
 
+  resetCache() {
+    this.uniswapV2Resolver.resetCache();
+    this.uniswapV3Resolver.resetCache();
+  }
+
   /**
    * Get token metadata (symbol, decimals) from blockchain
    */
@@ -371,7 +376,13 @@ export class EtfResolverService {
         if (!v3Path.exists || v3Path.liquidityUSD < MIN_LIQUIDITY_USD) {
           throw new Error('V3_PLUS_V3: Insufficient liquidity');
         }
-        return this.encodeV3ResolutionResult(chainId, v3Path, depositToken, targetToken, null);
+        return this.encodeV3ResolutionResult(
+          chainId,
+          v3Path,
+          depositToken,
+          targetToken,
+          null,
+        );
 
       default:
         throw new Error(`Unknown pricing mode: ${pricingMode}`);

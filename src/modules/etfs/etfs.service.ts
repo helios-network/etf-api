@@ -261,7 +261,7 @@ export class EtfsService {
     const tokenMetadataMap: Map<string, TokenMetadata> = new Map();
 
     let hasDepositTokenInComponents = false;
-
+    this.etfResolver.resetCache();
     for (const component of body.components) {
       const targetToken = component.token as `0x${string}`;
 
