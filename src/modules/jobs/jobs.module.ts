@@ -31,6 +31,7 @@ import { EventProcessingJob } from './event-processing.job';
 import { ChainlinkSyncJob } from './chainlink-sync.job';
 import { RewardDistributionJob } from './reward-distribution.job';
 import { VolumeSyncJob } from './volume-sync.job';
+import { AddEtfPriceChartEntryJob } from './add-etf-price-chart-entry.job';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { VolumeSyncJob } from './volume-sync.job';
     ChainlinkSyncJob,
     RewardDistributionJob,
     VolumeSyncJob,
+    AddEtfPriceChartEntryJob,
   ],
   exports: [VolumeSyncJob],
 })
