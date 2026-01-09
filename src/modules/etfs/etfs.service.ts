@@ -2,7 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CacheService } from 'src/infrastructure/cache/cache.service';
-import { ETF, ETFDocument } from 'src/models';
+import {
+  ETF,
+  ETFDocument,
+  WalletHolding,
+  WalletHoldingDocument,
+} from 'src/models';
 import {
   Web3Service,
   EtfResolverService,
@@ -29,13 +34,15 @@ export class EtfsService {
   constructor(
     @InjectModel(ETF.name)
     private etfModel: Model<ETFDocument>,
+    @InjectModel(WalletHolding.name)
+    private walletHoldingModel: Model<WalletHoldingDocument>,
     private readonly cacheService: CacheService,
     private readonly web3Service: Web3Service,
     private readonly etfResolver: EtfResolverService,
     private readonly chainlinkResolver: ChainlinkResolverService,
   ) {}
 
-  async getAll(page: number, size: number, search?: string) {
+  async getAll(page: number, size: number, search?: string, wallet?: string) {
     // Validate pagination parameters
     if (page < 1) {
       throw new Error('Page must be greater than 0');
@@ -55,9 +62,9 @@ export class EtfsService {
           ],
         }
       : {};
-
+    const normalizedWallet = wallet ? normalizeEthAddress(wallet) : '';
     // Build cache key with all parameters that influence the result
-    const cacheKey = `list:page=${page}:size=${size}:search=${normalizedSearch}`;
+    const cacheKey = `list:page=${page}:size=${size}:search=${normalizedSearch}:wallet=${normalizedWallet}`;
 
     // Use cache-aside pattern with 60 seconds TTL
     return await this.cacheService.wrap(
@@ -69,12 +76,41 @@ export class EtfsService {
         // Get total count for pagination metadata
         const total = await this.etfModel.countDocuments(searchFilter);
 
+        const heldEtfs: any[] = [];
+
+        if (normalizedWallet) {
+          const walletHolding = await this.walletHoldingModel
+            .findOne({
+              wallet: normalizedWallet,
+            })
+            .lean()
+            .exec();
+
+          if (walletHolding) {
+            const holdingEtfVaultIds = walletHolding.deposits.map(
+              (e) => e.etfVaultAddress,
+            );
+            const holdingEtfs = await this.etfModel
+              .find({ vault: { $in: holdingEtfVaultIds } })
+              .sort({ createdAt: -1 })
+              .limit(size)
+              .lean()
+              .exec();
+            heldEtfs.push(
+              ...holdingEtfs.map((etf) => ({ ...etf, held: true })),
+            );
+          }
+        }
+
         // Fetch ETFs with pagination
         const etfs = await this.etfModel
-          .find(searchFilter)
+          .find({
+            ...searchFilter,
+            _id: { $nin: heldEtfs.map((etf) => etf._id) },
+          })
           .sort({ createdAt: -1 })
           .skip(skip)
-          .limit(size)
+          .limit(size - heldEtfs.length)
           .lean()
           .exec();
 
@@ -85,7 +121,7 @@ export class EtfsService {
 
         return {
           success: true,
-          data: etfs,
+          data: [...heldEtfs, ...etfs],
           pagination: {
             page,
             size,

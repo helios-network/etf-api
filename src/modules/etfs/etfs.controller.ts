@@ -25,12 +25,18 @@ export class EtfsController {
     @Query('page') page?: string,
     @Query('size') size?: string,
     @Query('search') search?: string,
+    @Query('wallet') wallet?: string,
   ) {
     try {
       const pageNum = parseInt(page || '1', 10);
       const sizeNum = parseInt(size || '10', 10);
 
-      const result = await this.etfsService.getAll(pageNum, sizeNum, search);
+      const result = await this.etfsService.getAll(
+        pageNum,
+        sizeNum,
+        search,
+        wallet,
+      );
       return result;
     } catch (error) {
       if (error instanceof Error && error.message.includes('must be')) {
