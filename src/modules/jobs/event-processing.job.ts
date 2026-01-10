@@ -1280,7 +1280,7 @@ export class EventProcessingJob {
             v3PoolFee: asset.v3PoolFee || 0,
             symbol: asset.symbol,
             decimals: asset.decimals,
-            tvl: portfolio.valuesPerAsset[index] ?? '0',
+            // tvl: portfolio.valuesPerAsset[index] ?? '0',
           })) ?? [];
 
         // Update ETF
