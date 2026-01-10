@@ -143,7 +143,7 @@ export class EventProcessingJob {
     etf: ETFDocument,
   ): Promise<void> {
     // Update ETF TVL and share price
-    await this.updateETFPortfolio(etf.chain, new Set([etf.vault]));
+    await this.updateETFPortfolio(etf.chain, new Set([etf]));
 
     // Update wallet TVL
     const calculatedTVL = await this.walletHoldingUtils.calculateWalletTVL(
@@ -210,7 +210,7 @@ export class EventProcessingJob {
     etf: ETFDocument,
   ): Promise<void> {
     // Update ETF TVL and share price
-    await this.updateETFPortfolio(etf.chain, new Set([etf.vault]));
+    await this.updateETFPortfolio(etf.chain, new Set([etf]));
 
     // Update wallet TVL
     const calculatedTVL = await this.walletHoldingUtils.calculateWalletTVL(
@@ -1237,31 +1237,16 @@ export class EventProcessingJob {
    */
   private async updateETFPortfolio(
     chainId: ChainId,
-    vaultAddresses: Set<string>,
+    etfs: Set<ETFDocument>,
   ): Promise<void> {
-    if (vaultAddresses.size === 0) return;
+    if (etfs.size === 0) return;
 
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
 
     // Update each ETF individually
-    for (const vaultAddress of vaultAddresses) {
+    for (const etf of etfs) {
       try {
-        const normalizedVaultAddress = normalizeEthAddress(vaultAddress);
-        // Find ETF that needs updating (not updated in the last minute)
-        const etf = await this.etfModel.findOne({
-          vault: normalizedVaultAddress,
-          chain: Number(chainId),
-          $or: [
-            { updatedAt: { $lt: oneMinuteAgo } },
-            { updatedAt: { $exists: false } },
-            { volumeTradedUSD: 0 },
-            { sharePrice: { $not: { $exists: true } } },
-          ],
-        });
-
-        if (!etf) {
-          continue;
-        }
+        
 
         const portfolio = await this.vaultUtils.fetchVaultPortfolio(
           etf.vault as `0x${string}`,
@@ -1301,7 +1286,7 @@ export class EventProcessingJob {
           `Updated portfolio for ETF ${etf.vault}: TVL=${portfolio.totalValue}, NAV=${portfolio.nav}`,
         );
       } catch (error) {
-        this.logger.error(`Error updating portfolio for ETF ${vaultAddress}`);
+        this.logger.error(`Error updating portfolio for ETF ${etf.vault}`);
       }
     }
   }
