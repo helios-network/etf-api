@@ -274,13 +274,23 @@ export class EventProcessingJob {
 
   /**
    * Invalidate ETF cache after deposit or redeem
+   * Invalidates both the individual ETF cache and all list caches
    */
   private async invalidateEtfCache(vaultAddress: string): Promise<void> {
     try {
       const normalizedVault = normalizeEthAddress(vaultAddress);
-      const cacheKey = `etf:vaultAddress=${normalizedVault}`;
-      await this.cacheService.del(cacheKey, { namespace: 'etf' });
-      this.logger.debug(`Invalidated ETF cache for vault ${normalizedVault}`);
+      
+      // Invalidate individual ETF cache (used by getEtfWithVault)
+      const etfCacheKey = `etf:vaultAddress=${normalizedVault}`;
+      await this.cacheService.del(etfCacheKey, { namespace: 'etf' });
+      
+      // Invalidate all list caches (used by getAll)
+      // The pattern will match all keys like: list:page=1:size=10:search=:wallet=
+      await this.cacheService.delPattern('list:*', { namespace: 'etfs' });
+      
+      this.logger.debug(
+        `Invalidated ETF cache for vault ${normalizedVault} (individual + lists)`,
+      );
     } catch (error) {
       this.logger.warn(
         `Failed to invalidate ETF cache for vault ${vaultAddress}: ${error.message}`,
