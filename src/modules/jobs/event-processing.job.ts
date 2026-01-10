@@ -285,16 +285,17 @@ export class EventProcessingJob {
       await this.cacheService.del(etfCacheKey, { namespace: 'etf' });
       
       // Invalidate all list caches (used by getAll)
-      // Use a wildcard pattern to match all keys in the 'etfs' namespace
-      // This will match keys like: list:page=1:size=10:search=:wallet=
-      await this.cacheService.delPattern('*', { namespace: 'etfs' });
+      // Use the new invalidateNamespace method which builds the full pattern
+      // This will match: {namespace}:{nodeEnv}:etfs:*
+      await this.cacheService.invalidateNamespace('etfs');
       
       this.logger.debug(
-        `Invalidated ETF cache for vault ${normalizedVault} (individual + lists)`,
+        `Invalidated ETF cache for vault ${normalizedVault} (individual + all lists)`,
       );
     } catch (error) {
       this.logger.warn(
         `Failed to invalidate ETF cache for vault ${vaultAddress}: ${error.message}`,
+        error.stack,
       );
     }
   }

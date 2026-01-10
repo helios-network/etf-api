@@ -262,6 +262,28 @@ export class CacheService {
     }
   }
 
+  /**
+   * Invalidate all cache keys for a specific module namespace
+   * @param moduleNamespace The module namespace to invalidate (e.g., 'etfs', 'etf')
+   */
+  async invalidateNamespace(moduleNamespace: string): Promise<void> {
+    if (!this.enabled || !this.cacheManager) {
+      return;
+    }
+
+    try {
+      // Build pattern: {namespace}:{nodeEnv}:{moduleNamespace}:*
+      const pattern = `${this.namespace}:${this.nodeEnv}:${moduleNamespace}:*`;
+      await this.delPattern(pattern);
+      this.logger.debug(`Invalidated cache for namespace: ${moduleNamespace}`);
+    } catch (error) {
+      this.logger.error(
+        `Error invalidating namespace ${moduleNamespace}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   isEnabled(): boolean {
     return this.enabled;
   }
