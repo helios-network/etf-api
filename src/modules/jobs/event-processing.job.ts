@@ -1253,8 +1253,6 @@ export class EventProcessingJob {
   ): Promise<void> {
     if (etfs.size === 0) return;
 
-    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
-
     // Update each ETF individually
     for (const etf of etfs) {
       try {
@@ -1266,18 +1264,28 @@ export class EventProcessingJob {
           etf.shareDecimals,
         );
 
-        const vaultConfig = await this.vaultUtils.fetchVaultConfig(
+        // Fetch only assets configuration from vault (optimized - no pricer/symbol/decimals calls)
+        const vaultAssets = await this.vaultUtils.fetchVaultAssetsOnly(
           etf.vault as `0x${string}`,
-          etf.shareToken as `0x${string}`,
           chainId,
         );
 
-        
-        // Update assets with their TVL values
-        const updatedAssets = vaultConfig.assets?.map((asset, index) => ({
-            ... asset,
+        // Merge vault assets with existing ETF assets to preserve all existing data
+        // (feed, v2Path, v3Path, v3PoolFee, symbol, decimals)
+        // Create a map of existing assets by token address for quick lookup
+        const existingAssetsMap = new Map(
+          (etf.assets || []).map((asset) => [asset.token.toLowerCase(), asset]),
+        );
+
+        // Update assets with their TVL values, preserving all existing data
+        const updatedAssets = vaultAssets.map((asset, index) => {
+          const existingAsset = existingAssetsMap.get(asset.token.toLowerCase());
+          return {
+            ... existingAsset,
+            targetWeightBps: asset.targetWeightBps,
             tvl: portfolio.valuesPerAsset[index] ?? '0',
-          })) ?? [];
+          };
+        });
 
         // Update ETF
         // Note: portfolio.totalValue is a string, but tvl in schema is Number

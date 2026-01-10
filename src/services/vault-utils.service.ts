@@ -361,6 +361,78 @@ export class VaultUtilsService {
   }
 
   /**
+   * Fetch only vault assets configuration (optimized version)
+   * This method only fetches assets from vault (token + targetWeightBps) without pricer data
+   * Use this when you already have pricer data (feed, v2Path, v3Path, v3PoolFee) and symbol/decimals
+   * from ETF document to avoid redundant calls
+   */
+  async fetchVaultAssetsOnly(
+    vaultAddress: `0x${string}`,
+    chainId: ChainId,
+  ): Promise<Array<{
+    token: string;
+    targetWeightBps: number;
+  }>> {
+    // Fetch assets from vault only
+    const raw = await this.rpcClientService.execute(chainId, (client) =>
+      client.call({
+        to: vaultAddress,
+        data: encodeFunctionData({
+          abi: [
+            {
+              type: 'function',
+              name: 'getAssets',
+              inputs: [],
+              outputs: [
+                {
+                  type: 'tuple[]',
+                  components: [
+                    { name: 'token', type: 'address' },
+                    { name: 'targetWeightBps', type: 'uint256' },
+                  ],
+                },
+              ],
+              stateMutability: 'view',
+            },
+          ],
+          functionName: 'getAssets',
+          args: [],
+        }),
+      }),
+    );
+
+    if (!raw.data) {
+      throw new Error('No data returned from vault');
+    }
+
+    const assetsResults = decodeFunctionResult({
+      abi: [
+        {
+          type: 'function',
+          name: 'getAssets',
+          inputs: [],
+          outputs: [
+            {
+              type: 'tuple[]',
+              components: [
+                { name: 'token', type: 'address' },
+                { name: 'targetWeightBps', type: 'uint256' },
+              ],
+            },
+          ],
+          stateMutability: 'view',
+        },
+      ],
+      data: raw.data,
+    });
+
+    return assetsResults.map((asset: any) => ({
+      token: asset.token as string,
+      targetWeightBps: Number(asset.targetWeightBps),
+    }));
+  }
+
+  /**
    * Convert BigInt to string with decimals rounding
    */
   formatTokenAmount(
