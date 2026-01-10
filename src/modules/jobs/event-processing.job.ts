@@ -18,6 +18,7 @@ import {
   EtfPriceChartService,
   RpcClientService,
 } from 'src/services';
+import { CacheService } from 'src/infrastructure/cache/cache.service';
 import {
   Event,
   EventDocument,
@@ -128,6 +129,7 @@ export class EventProcessingJob {
     private readonly etfVolumeService: EtfVolumeService,
     private readonly etfPriceChartService: EtfPriceChartService,
     private readonly rpcClientService: RpcClientService,
+    private readonly cacheService: CacheService,
   ) {
     this.logger.log('EventProcessingJob constructor called');
   }
@@ -268,6 +270,22 @@ export class EventProcessingJob {
         },
       },
     );
+  }
+
+  /**
+   * Invalidate ETF cache after deposit or redeem
+   */
+  private async invalidateEtfCache(vaultAddress: string): Promise<void> {
+    try {
+      const normalizedVault = normalizeEthAddress(vaultAddress);
+      const cacheKey = `etf:vaultAddress=${normalizedVault}`;
+      await this.cacheService.del(cacheKey, { namespace: 'etf' });
+      this.logger.debug(`Invalidated ETF cache for vault ${normalizedVault}`);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate ETF cache for vault ${vaultAddress}: ${error.message}`,
+      );
+    }
   }
 
   /**
@@ -416,6 +434,10 @@ export class EventProcessingJob {
 
     // Apply middlewares
     await this.middlewareAfterDeposit(sharesOut, walletHolding, etf);
+
+    // Invalidate ETF cache
+    await this.invalidateEtfCache(normalizedVault);
+
     return true;
   }
 
@@ -491,6 +513,10 @@ export class EventProcessingJob {
 
     // Apply middlewares
     await this.middlewareAfterRedeem(sharesIn, walletHolding, etf);
+
+    // Invalidate ETF cache
+    await this.invalidateEtfCache(normalizedVault);
+
     return true;
   }
 
