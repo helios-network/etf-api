@@ -1264,19 +1264,28 @@ export class EventProcessingJob {
           etf.shareDecimals,
         );
 
+        const vaultConfig = await this.vaultUtils.fetchVaultConfig(
+          etf.vault as `0x${string}`,
+          etf.shareToken as `0x${string}`,
+          chainId,
+        );
+
+        
+  
+
         // Update assets with their TVL values
-        const updatedAssets =
-          etf.assets?.map((asset, index) => ({
-            token: asset.token,
-            feed: asset.feed,
-            targetWeightBps: asset.targetWeightBps,
-            v2Path: asset.v2Path || [],
-            v3Path: asset.v3Path || '',
-            v3PoolFee: asset.v3PoolFee || 0,
-            symbol: asset.symbol,
-            decimals: asset.decimals,
-            // tvl: portfolio.valuesPerAsset[index] ?? '0',
-          })) ?? [];
+        // const updatedAssets =
+        //   etf.assets?.map((asset, index) => ({
+        //     token: asset.token,
+        //     feed: asset.feed,
+        //     targetWeightBps: asset.targetWeightBps,
+        //     v2Path: asset.v2Path || [],
+        //     v3Path: asset.v3Path || '',
+        //     v3PoolFee: asset.v3PoolFee || 0,
+        //     symbol: asset.symbol,
+        //     decimals: asset.decimals,
+        //     // tvl: portfolio.valuesPerAsset[index] ?? '0',
+        //   })) ?? [];
 
         // Update ETF
         // Note: portfolio.totalValue is a string, but tvl in schema is Number
@@ -1287,7 +1296,7 @@ export class EventProcessingJob {
             $set: {
               tvl: Number(portfolio.totalValue),
               sharePrice: Number(portfolio.nav),
-              assets: updatedAssets,
+              assets: vaultConfig.assets,
             },
           },
         );
