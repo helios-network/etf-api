@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { erc20Abi, encodeAbiParameters } from 'viem';
+import { erc20Abi, encodeAbiParameters, formatUnits } from 'viem';
 import { ASSETS_ADDRS, MIN_LIQUIDITY_USD } from '../constants';
 import { ChainlinkResolverService } from './chainlink-resolver.service';
 import { UniswapV2ResolverService } from './uniswap-v2-resolver.service';
@@ -99,7 +99,8 @@ export class EtfResolverService {
       );
 
       const answer = result[1] as bigint;
-      return Number(answer) / 10 ** decimals;
+      // Use formatUnits for safe bigint to number conversion (consistent with pathfinder refactor)
+      return Number(formatUnits(answer, decimals));
     } catch (error) {
       this.logger.error(`Error fetching Chainlink price from ${feedAddress}:`, error);
       return null;
@@ -166,6 +167,7 @@ export class EtfResolverService {
     }
 
     // Check Mode 1: V2 + Chainlink Feed
+    // Uses shared pathfinder algorithm (tries direct, then via WETH/intermediates)
     if (hasFeed && targetPrice) {
       const v2Path = await this.uniswapV2Resolver.findV2Path(
         chainId,
@@ -182,6 +184,7 @@ export class EtfResolverService {
     }
 
     // Check Mode 2: V3 + Chainlink Feed
+    // Uses shared pathfinder algorithm (tries direct, then via WETH/intermediates)
     if (hasFeed && targetPrice) {
       const v3Path = await this.uniswapV3Resolver.findV3Path(
         chainId,
@@ -198,6 +201,7 @@ export class EtfResolverService {
     }
 
     // Check Mode 3: V2 + V2 (DEX-only)
+    // Uses shared pathfinder algorithm with price estimation from pools
     const v2Path = await this.uniswapV2Resolver.findV2Path(
       chainId,
       depositToken,
@@ -212,6 +216,7 @@ export class EtfResolverService {
     }
 
     // Check Mode 4: V3 + V3 (last resort)
+    // Uses shared pathfinder algorithm with price estimation from pools
     const v3Path = await this.uniswapV3Resolver.findV3Path(
       chainId,
       depositToken,
@@ -278,6 +283,7 @@ export class EtfResolverService {
         if (!targetFeed || !targetPrice) {
           throw new Error('V2_PLUS_FEED requires Chainlink feed');
         }
+        // Uses shared pathfinder: tries direct path, then via WETH/intermediates
         const v2PathFeed = await this.uniswapV2Resolver.findV2Path(
           chainId,
           depositToken,
@@ -312,6 +318,7 @@ export class EtfResolverService {
         if (!targetFeed || !targetPrice) {
           throw new Error('V3_PLUS_FEED requires Chainlink feed');
         }
+        // Uses shared pathfinder: tries direct path (all fee tiers), then via WETH/intermediates
         const v3PathFeed = await this.uniswapV3Resolver.findV3Path(
           chainId,
           depositToken,
@@ -333,6 +340,8 @@ export class EtfResolverService {
         );
 
       case 'V2_PLUS_V2':
+        // Uses shared pathfinder: tries direct path, then via WETH/intermediates
+        // Price estimation from pools when Chainlink feed unavailable
         const v2Path = await this.uniswapV2Resolver.findV2Path(
           chainId,
           depositToken,
@@ -364,6 +373,8 @@ export class EtfResolverService {
         };
 
       case 'V3_PLUS_V3':
+        // Uses shared pathfinder: tries direct path (all fee tiers), then via WETH/intermediates
+        // Price estimation from pools when Chainlink feed unavailable
         const v3Path = await this.uniswapV3Resolver.findV3Path(
           chainId,
           depositToken,

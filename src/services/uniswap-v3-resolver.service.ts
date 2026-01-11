@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { parseAbi, encodePacked } from 'viem';
+import { parseAbi, encodePacked, formatUnits } from 'viem';
 import {
   UNISWAP_V3_FACTORY_ADDRS,
   UNISWAP_V3_FEES,
@@ -9,7 +9,12 @@ import {
 import { V3PoolInfo, V3PathInfo } from '../types/etf-verify.types';
 import { RpcClientService } from './rpc-client/rpc-client.service';
 import { ChainId } from '../config/web3';
-import { ethers } from 'ethers';
+import {
+  PoolResolver,
+  PathCandidate,
+  PathMetadata,
+  AmmPathfinderService,
+} from './amm-pathfinder.service';
 
 /**
  * Uniswap V3 Factory ABI
@@ -36,15 +41,26 @@ const V3_QUOTER_ABI = parseAbi([
   'function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) view returns (uint256 amountOut)',
 ]);
 
+/**
+ * Uniswap V3 Pool Resolver implementing the shared PoolResolver interface.
+ * Path type is V3PathInfo (contains fee tiers, isDirect flag, etc.).
+ */
 @Injectable()
-export class UniswapV3ResolverService {
+export class UniswapV3ResolverService implements PoolResolver<V3PathInfo> {
   private readonly logger = new Logger(UniswapV3ResolverService.name);
+  private readonly pathfinder = new AmmPathfinderService();
+
+  // Cache for path results (stable keys, no price dependencies)
   private pathCache = new Map<string, V3PathInfo>();
+  // Cache for liquidity calculations
+  private liquidityCache = new Map<string, { value: number; timestamp: number }>();
+  private readonly LIQUIDITY_CACHE_TTL_MS = 60000; // 60 seconds
 
   constructor(private readonly rpcClientService: RpcClientService) {}
 
   resetCache() {
     this.pathCache.clear();
+    this.liquidityCache.clear();
   }
   /**
    * Check if a V3 pool exists for a given fee tier
@@ -200,10 +216,9 @@ export class UniswapV3ResolverService {
           ? tokenADecimals
           : tokenBDecimals;
 
-      // Convert balances safely (string -> number)
-      // (Pour une TVL énorme, number peut perdre un peu de précision, mais évite overflow direct)
-      const amount0 = Number(ethers.formatUnits(balance0Raw, decimals0));
-      const amount1 = Number(ethers.formatUnits(balance1Raw, decimals1));
+      // Convert balances safely using viem's formatUnits (consistent with V2)
+      const amount0 = Number(formatUnits(balance0Raw, decimals0));
+      const amount1 = Number(formatUnits(balance1Raw, decimals1));
 
       // Read slot0 to get tick
       const slot0 = await this.rpcClientService.execute(
@@ -370,6 +385,151 @@ export class UniswapV3ResolverService {
     return bestPool;
   }
 
+  /**
+   * PoolResolver interface implementation: find direct path between tokenA and tokenB.
+   * Tries all fee tiers and returns the best one.
+   */
+  async direct(meta: PathMetadata): Promise<PathCandidate<V3PathInfo>> {
+    const bestPool = await this.findBestV3Pool(
+      meta.chainId,
+      meta.tokenA,
+      meta.tokenB,
+      meta.tokenADecimals,
+      meta.tokenBDecimals,
+      meta.tokenAPriceUSD,
+      meta.tokenBPriceUSD,
+    );
+
+    if (bestPool.exists && bestPool.liquidityUSD > 0) {
+      return {
+        exists: true,
+        liquidityUSD: bestPool.liquidityUSD,
+        path: {
+          exists: true,
+          liquidityUSD: bestPool.liquidityUSD,
+          isDirect: true,
+          fee: bestPool.fee,
+          token0: bestPool.token0,
+          token1: bestPool.token1,
+        },
+        metadata: {
+          poolAddress: bestPool.poolAddress,
+          calculatedTokenBPriceUSD: bestPool.calculatedTokenBPriceUSD,
+        },
+      };
+    }
+
+    return {
+      exists: false,
+      liquidityUSD: 0,
+      path: {
+        exists: false,
+        liquidityUSD: 0,
+        isDirect: false,
+      },
+    };
+  }
+
+  /**
+   * PoolResolver interface implementation: find 2-hop path via intermediate token.
+   * Tries all fee tiers for both hops and returns the best combination.
+   */
+  async via(
+    meta: PathMetadata,
+    midToken: `0x${string}`,
+    midDecimals: number,
+    midPriceUSD: number | null,
+  ): Promise<PathCandidate<V3PathInfo>> {
+    // Find best pool for first hop: tokenA -> midToken
+    const poolAtoMid = await this.findBestV3Pool(
+      meta.chainId,
+      meta.tokenA,
+      midToken,
+      meta.tokenADecimals,
+      midDecimals,
+      meta.tokenAPriceUSD,
+      midPriceUSD,
+    );
+
+    if (!poolAtoMid.exists) {
+      return {
+        exists: false,
+        liquidityUSD: 0,
+        path: {
+          exists: false,
+          liquidityUSD: 0,
+          isDirect: false,
+        },
+      };
+    }
+
+    // Use calculated price from first hop if available, otherwise use provided price
+    const effectiveMidPrice =
+      poolAtoMid.calculatedTokenBPriceUSD || midPriceUSD;
+
+    // Find best pool for second hop: midToken -> tokenB
+    const poolMidToB = await this.findBestV3Pool(
+      meta.chainId,
+      midToken,
+      meta.tokenB,
+      midDecimals,
+      meta.tokenBDecimals,
+      effectiveMidPrice,
+      meta.tokenBPriceUSD,
+    );
+
+    if (!poolMidToB.exists) {
+      return {
+        exists: false,
+        liquidityUSD: 0,
+        path: {
+          exists: false,
+          liquidityUSD: 0,
+          isDirect: false,
+        },
+      };
+    }
+
+    // Take minimum liquidity of the path (bottleneck)
+    const pathLiquidity = Math.min(
+      poolAtoMid.liquidityUSD,
+      poolMidToB.liquidityUSD,
+    );
+
+    if (pathLiquidity > 0) {
+      return {
+        exists: true,
+        liquidityUSD: pathLiquidity,
+        path: {
+          exists: true,
+          liquidityUSD: pathLiquidity,
+          isDirect: false,
+          depositToWethFee: poolAtoMid.fee,
+          wethToTargetFee: poolMidToB.fee,
+        },
+        metadata: {
+          poolAtoMidAddress: poolAtoMid.poolAddress,
+          poolMidToBAddress: poolMidToB.poolAddress,
+          calculatedMidPriceUSD: poolAtoMid.calculatedTokenBPriceUSD,
+        },
+      };
+    }
+
+    return {
+      exists: false,
+      liquidityUSD: 0,
+      path: {
+        exists: false,
+        liquidityUSD: 0,
+        isDirect: false,
+      },
+    };
+  }
+
+  /**
+   * Public method: Find V3 path using the shared pathfinder algorithm.
+   * Maintains backward compatibility with existing code.
+   */
   async findV3Path(
     chainId: number,
     depositToken: `0x${string}`,
@@ -379,27 +539,51 @@ export class UniswapV3ResolverService {
     depositTokenPriceUSD: number | null,
     targetTokenPriceUSD: number | null,
   ): Promise<V3PathInfo> {
-    const cacheKey = `${chainId}-${depositToken}-${targetToken}-${depositTokenDecimals}-${targetTokenDecimals}-${depositTokenPriceUSD}-${targetTokenPriceUSD}`;
+    // Use stable cache key (no price dependencies, no decimals - they're just for calculation)
+    // Normalize token addresses to ensure consistent ordering
+    const [tokenA, tokenB] = [depositToken, targetToken].map((t) =>
+      t.toLowerCase(),
+    );
+    const cacheKey = `v3-${chainId}-${tokenA < tokenB ? `${tokenA}-${tokenB}` : `${tokenB}-${tokenA}`}`;
+
+    // Check cache
     if (this.pathCache.has(cacheKey)) {
       return this.pathCache.get(cacheKey)!;
     }
 
-    const path = await this.findV3PathUncached(
+    // Use shared pathfinder algorithm
+    const meta: PathMetadata = {
       chainId,
-      depositToken,
-      targetToken,
-      depositTokenDecimals,
-      targetTokenDecimals,
-      depositTokenPriceUSD,
-      targetTokenPriceUSD,
+      tokenA: depositToken,
+      tokenB: targetToken,
+      tokenADecimals: depositTokenDecimals,
+      tokenBDecimals: targetTokenDecimals,
+      tokenAPriceUSD: depositTokenPriceUSD,
+      tokenBPriceUSD: targetTokenPriceUSD,
+    };
+
+    const result = await this.pathfinder.bestPath(
+      this,
+      meta,
+      MIN_LIQUIDITY_USD,
     );
-    this.pathCache.set(cacheKey, path);
-    return path;
+
+    const pathInfo: V3PathInfo = result
+      ? result.path
+      : {
+          exists: false,
+          liquidityUSD: 0,
+          isDirect: false,
+        };
+
+    // Cache the result
+    this.pathCache.set(cacheKey, pathInfo);
+    return pathInfo;
   }
 
   /**
-   * Find V3 path from depositToken to targetToken (direct or via WETH)
-   * Similar to findV2Path but for V3 pools
+   * Legacy method kept for backward compatibility.
+   * @deprecated Use findV3Path instead, which now uses the shared pathfinder.
    */
   async findV3PathUncached(
     chainId: number,
@@ -410,8 +594,8 @@ export class UniswapV3ResolverService {
     depositTokenPriceUSD: number | null,
     targetTokenPriceUSD: number | null,
   ): Promise<V3PathInfo> {
-    // Try direct path first
-    const directPool = await this.findBestV3Pool(
+    // Delegate to findV3Path (which handles caching internally)
+    return this.findV3Path(
       chainId,
       depositToken,
       targetToken,
@@ -420,66 +604,6 @@ export class UniswapV3ResolverService {
       depositTokenPriceUSD,
       targetTokenPriceUSD,
     );
-
-    if (directPool.exists && directPool.liquidityUSD >= MIN_LIQUIDITY_USD) {
-      return {
-        exists: true,
-        liquidityUSD: directPool.liquidityUSD,
-        isDirect: true,
-        fee: directPool.fee,
-      };
-    }
-
-    // Try 2-hop path via WETH (most common intermediate token on Ethereum)
-    const WETH = ASSETS_ADDRS[chainId].WETH as `0x${string}`;
-
-    // Find best pool for depositToken -> WETH
-    const depositToWethPool = await this.findBestV3Pool(
-      chainId,
-      depositToken,
-      WETH,
-      depositTokenDecimals,
-      18, // WETH decimals
-      depositTokenPriceUSD,
-      null, // WETH price (we'll estimate)
-    );
-
-    // Find best pool for WETH -> targetToken
-    const wethToTargetPool = await this.findBestV3Pool(
-      chainId,
-      WETH,
-      targetToken,
-      18, // WETH decimals
-      targetTokenDecimals,
-      depositToWethPool.calculatedTokenBPriceUSD, // WETH price
-      targetTokenPriceUSD,
-    );
-
-    // Take minimum liquidity of the path
-    const twoHopLiquidityToCheck = Math.min(
-      depositToWethPool.liquidityUSD,
-      wethToTargetPool.liquidityUSD,
-    );
-
-    if (
-      depositToWethPool.exists &&
-      wethToTargetPool.exists &&
-      twoHopLiquidityToCheck >= MIN_LIQUIDITY_USD
-    ) {
-      return {
-        exists: true,
-        liquidityUSD: wethToTargetPool.liquidityUSD,
-        isDirect: false,
-        depositToWethFee: depositToWethPool.fee,
-        wethToTargetFee: wethToTargetPool.fee,
-      };
-    }
-
-    return {
-      exists: false,
-      liquidityUSD: 0,
-      isDirect: false,
-    };
   }
 
   /**
