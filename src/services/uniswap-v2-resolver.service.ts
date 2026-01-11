@@ -172,7 +172,7 @@ export class UniswapV2ResolverService {
 
       // Otherwise, use router to quote a swap and estimate
       // Quote swapping 1 tokenA to tokenB, then estimate USD
-      const amountIn = BigInt(10 ** tokenADecimals); // 1 token
+      const amountIn = 10n ** BigInt(tokenADecimals); // 1 token
       try {
         const amountsOut = await this.rpcClientService.execute(
           chainId as ChainId,
@@ -324,7 +324,7 @@ export class UniswapV2ResolverService {
     }
 
     // Try 2-hop path via WETH (most common intermediate token on Ethereum)
-    const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as `0x${string}`;
+    const WETH = ASSETS_ADDRS[chainId].WETH as `0x${string}`;
 
     let depositPrice = depositTokenPriceUSD;
     if (!depositPrice || depositPrice === 0) {
