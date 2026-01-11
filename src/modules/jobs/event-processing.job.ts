@@ -1277,14 +1277,33 @@ export class EventProcessingJob {
           (etf.assets || []).map((asset) => [asset.token.toLowerCase(), asset]),
         );
 
+        // Create a map of TVL values by token address to ensure correct mapping
+        // Note: valuesPerAsset should be in the same order as vaultAssets from getAssets()
+        // but we'll create a map for safety in case order differs
+        const tvlMap = new Map<string, string>();
+        vaultAssets.forEach((asset, index) => {
+          const tokenLower = asset.token.toLowerCase();
+          const tvlValue = portfolio.valuesPerAsset[index];
+          if (tvlValue) {
+            tvlMap.set(tokenLower, tvlValue);
+          }
+        });
+
         // Update assets with their TVL values, preserving all existing data
-        const updatedAssets = vaultAssets.map((asset, index) => {
-          const existingAsset = existingAssetsMap.get(asset.token.toLowerCase());
-          console.log('updated assets', existingAsset?.symbol, 'tvl', portfolio.valuesPerAsset[index]);
+        const updatedAssets = vaultAssets.map((asset) => {
+          const tokenLower = asset.token.toLowerCase();
+          const existingAsset = existingAssetsMap.get(tokenLower);
+          const tvl = tvlMap.get(tokenLower) ?? '0';
+          
+          console.log('updated assets', existingAsset?.symbol || asset.token, 'tvl', tvl);
+          
+          // If existingAsset exists, spread it first, then override with new values
+          // If it doesn't exist, start with empty object
           return {
-            ... existingAsset,
+            ...(existingAsset || {}),
+            token: asset.token, // Ensure token is set
             targetWeightBps: asset.targetWeightBps,
-            tvl: portfolio.valuesPerAsset[index] ?? '0',
+            tvl: tvl, // Always update TVL with latest value
           };
         });
 
