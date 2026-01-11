@@ -1280,6 +1280,7 @@ export class EventProcessingJob {
         // Update assets with their TVL values, preserving all existing data
         const updatedAssets = vaultAssets.map((asset, index) => {
           const existingAsset = existingAssetsMap.get(asset.token.toLowerCase());
+          console.log('updated assets', existingAsset?.symbol, 'tvl', portfolio.valuesPerAsset[index]);
           return {
             ... existingAsset,
             targetWeightBps: asset.targetWeightBps,
