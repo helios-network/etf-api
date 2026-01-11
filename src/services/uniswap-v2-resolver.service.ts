@@ -1,13 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { parseAbi, encodeAbiParameters } from 'viem';
+import { parseAbi, formatUnits } from 'viem';
 import {
   ASSETS_ADDRS,
   UNISWAP_V2_FACTORY_ADDRS,
   UNISWAP_V2_ROUTER_ADDRS,
+  MIN_LIQUIDITY_USD,
 } from '../constants';
 import { V2PoolInfo } from '../types/etf-verify.types';
 import { RpcClientService } from './rpc-client/rpc-client.service';
 import { ChainId } from '../config/web3';
+import {
+  PoolResolver,
+  PathCandidate,
+  PathMetadata,
+  AmmPathfinderService,
+} from './amm-pathfinder.service';
 
 /**
  * Uniswap V2 Factory ABI
@@ -32,16 +39,26 @@ const V2_ROUTER_ABI = parseAbi([
   'function getAmountsOut(uint amountIn, address[] calldata path) view returns (uint[] memory amounts)',
 ]);
 
+/**
+ * Uniswap V2 Pool Resolver implementing the shared PoolResolver interface.
+ * Path type is string[] (array of token addresses).
+ */
 @Injectable()
-export class UniswapV2ResolverService {
+export class UniswapV2ResolverService implements PoolResolver<string[]> {
   private readonly logger = new Logger(UniswapV2ResolverService.name);
+  private readonly pathfinder = new AmmPathfinderService();
 
+  // Cache for path results (stable keys, no price dependencies)
   private pathCache = new Map<string, V2PoolInfo>();
+  // Cache for liquidity calculations (TTL: 30-120s in production, but we use simple Map for now)
+  private liquidityCache = new Map<string, { value: number; timestamp: number }>();
+  private readonly LIQUIDITY_CACHE_TTL_MS = 60000; // 60 seconds
 
   constructor(private readonly rpcClientService: RpcClientService) {}
 
   resetCache() {
     this.pathCache.clear();
+    this.liquidityCache.clear();
   }
   /**
    * Check if a V2 pool exists between two tokens
@@ -160,13 +177,13 @@ export class UniswapV2ResolverService {
       const reserveA = isTokenAFirst ? reserves.reserve0 : reserves.reserve1;
       const reserveB = isTokenAFirst ? reserves.reserve1 : reserves.reserve0;
 
-      // Calculate USD value
+      // Calculate USD value using formatUnits to safely convert bigint to number
       // If we have prices, use them directly
       if (tokenAPriceUSD && tokenBPriceUSD) {
-        const valueA =
-          (Number(reserveA) / 10 ** tokenADecimals) * tokenAPriceUSD;
-        const valueB =
-          (Number(reserveB) / 10 ** tokenBDecimals) * tokenBPriceUSD;
+        const amountA = Number(formatUnits(reserveA, tokenADecimals));
+        const amountB = Number(formatUnits(reserveB, tokenBDecimals));
+        const valueA = amountA * tokenAPriceUSD;
+        const valueB = amountB * tokenBPriceUSD;
         return valueA + valueB;
       }
 
@@ -186,28 +203,25 @@ export class UniswapV2ResolverService {
         );
 
         const amountOut = amountsOut[1] as bigint;
-        const priceRatio =
-          (Number(amountOut) / Number(amountIn)) *
-          (10 ** tokenADecimals / 10 ** tokenBDecimals);
+        const amountInFormatted = Number(formatUnits(amountIn, tokenADecimals));
+        const amountOutFormatted = Number(formatUnits(amountOut, tokenBDecimals));
+        const priceRatio = amountOutFormatted / amountInFormatted;
 
         // If we have price for tokenB, calculate liquidity
         if (tokenBPriceUSD) {
-          const valueA =
-            (Number(reserveA) / 10 ** tokenADecimals) *
-            priceRatio *
-            tokenBPriceUSD;
-          const valueB =
-            (Number(reserveB) / 10 ** tokenBDecimals) * tokenBPriceUSD;
+          const amountA = Number(formatUnits(reserveA, tokenADecimals));
+          const amountB = Number(formatUnits(reserveB, tokenBDecimals));
+          const valueA = amountA * priceRatio * tokenBPriceUSD;
+          const valueB = amountB * tokenBPriceUSD;
           return valueA + valueB;
         }
 
         // If we have price for tokenA
         if (tokenAPriceUSD) {
-          const valueA =
-            (Number(reserveA) / 10 ** tokenADecimals) * tokenAPriceUSD;
-          const valueB =
-            (Number(reserveB) / 10 ** tokenBDecimals / priceRatio) *
-            tokenAPriceUSD;
+          const amountA = Number(formatUnits(reserveA, tokenADecimals));
+          const amountB = Number(formatUnits(reserveB, tokenBDecimals));
+          const valueA = amountA * tokenAPriceUSD;
+          const valueB = (amountB / priceRatio) * tokenAPriceUSD;
           return valueA + valueB;
         }
 
@@ -242,7 +256,7 @@ export class UniswapV2ResolverService {
       }
 
       // Quote 1 WETH in USDC
-      const amountIn = BigInt(10 ** WETH_DECIMALS); // 1 WETH
+      const amountIn = 10n ** BigInt(WETH_DECIMALS); // 1 WETH
       const amountsOut = await this.rpcClientService.execute(
         chainId as ChainId,
         (client) =>
@@ -255,8 +269,8 @@ export class UniswapV2ResolverService {
       );
 
       const amountOut = amountsOut[1] as bigint;
-      // Convert to USD price: amountOut is in USDC (6 decimals), so divide by 10^6
-      const wethPriceUSD = Number(amountOut) / 10 ** USDC_DECIMALS;
+      // Convert to USD price using formatUnits for safe bigint conversion
+      const wethPriceUSD = Number(formatUnits(amountOut, USDC_DECIMALS));
 
       return wethPriceUSD;
     } catch (error) {
@@ -265,6 +279,101 @@ export class UniswapV2ResolverService {
     }
   }
 
+  /**
+   * PoolResolver interface implementation: find direct path between tokenA and tokenB.
+   */
+  async direct(meta: PathMetadata): Promise<PathCandidate<string[]>> {
+    const liquidity = await this.calculateV2LiquidityUSD(
+      meta.chainId,
+      meta.tokenA,
+      meta.tokenB,
+      meta.tokenADecimals,
+      meta.tokenBDecimals,
+      meta.tokenAPriceUSD,
+      meta.tokenBPriceUSD,
+    );
+
+    if (liquidity > 0) {
+      return {
+        exists: true,
+        liquidityUSD: liquidity,
+        path: [meta.tokenA, meta.tokenB],
+      };
+    }
+
+    return {
+      exists: false,
+      liquidityUSD: 0,
+      path: [],
+    };
+  }
+
+  /**
+   * PoolResolver interface implementation: find 2-hop path via intermediate token.
+   */
+  async via(
+    meta: PathMetadata,
+    midToken: `0x${string}`,
+    midDecimals: number,
+    midPriceUSD: number | null,
+  ): Promise<PathCandidate<string[]>> {
+    // Calculate liquidity for first hop: tokenA -> midToken
+    const liquidityAtoMid = await this.calculateV2LiquidityUSD(
+      meta.chainId,
+      meta.tokenA,
+      midToken,
+      meta.tokenADecimals,
+      midDecimals,
+      meta.tokenAPriceUSD,
+      midPriceUSD,
+    );
+
+    // Estimate midToken price if not provided (needed for second hop)
+    let effectiveMidPrice = midPriceUSD;
+    if (!effectiveMidPrice || effectiveMidPrice === 0) {
+      // Try to get WETH price if midToken is WETH
+      if (midToken.toLowerCase() === ASSETS_ADDRS[meta.chainId]?.WETH?.toLowerCase()) {
+        effectiveMidPrice = await this.getWETHPriceInUSDC(meta.chainId);
+      }
+      // If still no price, use a fallback (1 USD) to allow calculation
+      if (!effectiveMidPrice || effectiveMidPrice === 0) {
+        effectiveMidPrice = meta.tokenAPriceUSD || 1;
+      }
+    }
+
+    // Calculate liquidity for second hop: midToken -> tokenB
+    const liquidityMidToB = await this.calculateV2LiquidityUSD(
+      meta.chainId,
+      midToken,
+      meta.tokenB,
+      midDecimals,
+      meta.tokenBDecimals,
+      effectiveMidPrice,
+      meta.tokenBPriceUSD,
+    );
+
+    // Take minimum liquidity of the path (bottleneck)
+    const pathLiquidity = Math.min(liquidityAtoMid, liquidityMidToB);
+
+    if (pathLiquidity > 0) {
+      return {
+        exists: true,
+        liquidityUSD: pathLiquidity,
+        path: [meta.tokenA, midToken, meta.tokenB],
+      };
+    }
+
+    return {
+      exists: false,
+      liquidityUSD: 0,
+      path: [],
+    };
+  }
+
+  /**
+   * Public method: Find V2 path using the shared pathfinder algorithm.
+   * Maintains backward compatibility with existing code.
+   */
   async findV2Path(
     chainId: number,
     depositToken: `0x${string}`,
@@ -274,26 +383,55 @@ export class UniswapV2ResolverService {
     depositTokenPriceUSD: number | null,
     targetTokenPriceUSD: number | null,
   ): Promise<V2PoolInfo> {
-    const cacheKey = `${chainId}-${depositToken}-${targetToken}-${depositTokenDecimals}-${targetTokenDecimals}-${depositTokenPriceUSD}-${targetTokenPriceUSD}`;
+    // Use stable cache key (no price dependencies, no decimals - they're just for calculation)
+    // Normalize token addresses to ensure consistent ordering
+    const [tokenA, tokenB] = [depositToken, targetToken].map((t) =>
+      t.toLowerCase(),
+    );
+    const cacheKey = `v2-${chainId}-${tokenA < tokenB ? `${tokenA}-${tokenB}` : `${tokenB}-${tokenA}`}`;
+
+    // Check cache
     if (this.pathCache.has(cacheKey)) {
       return this.pathCache.get(cacheKey)!;
     }
 
-    const path = await this.findV2PathUncached(
+    // Use shared pathfinder algorithm
+    const meta: PathMetadata = {
       chainId,
-      depositToken,
-      targetToken,
-      depositTokenDecimals,
-      targetTokenDecimals,
-      depositTokenPriceUSD,
-      targetTokenPriceUSD,
+      tokenA: depositToken,
+      tokenB: targetToken,
+      tokenADecimals: depositTokenDecimals,
+      tokenBDecimals: targetTokenDecimals,
+      tokenAPriceUSD: depositTokenPriceUSD,
+      tokenBPriceUSD: targetTokenPriceUSD,
+    };
+
+    const result = await this.pathfinder.bestPath(
+      this,
+      meta,
+      MIN_LIQUIDITY_USD,
     );
-    this.pathCache.set(cacheKey, path);
-    return path;
+
+    const pathInfo: V2PoolInfo = result
+      ? {
+          exists: true,
+          liquidityUSD: result.liquidityUSD,
+          path: result.path,
+        }
+      : {
+          exists: false,
+          liquidityUSD: 0,
+          path: [],
+        };
+
+    // Cache the result
+    this.pathCache.set(cacheKey, pathInfo);
+    return pathInfo;
   }
 
   /**
-   * Find V2 path from depositToken to targetToken (1 or 2 hops max)
+   * Legacy method kept for backward compatibility.
+   * @deprecated Use findV2Path instead, which now uses the shared pathfinder.
    */
   async findV2PathUncached(
     chainId: number,
@@ -304,8 +442,8 @@ export class UniswapV2ResolverService {
     depositTokenPriceUSD: number | null,
     targetTokenPriceUSD: number | null,
   ): Promise<V2PoolInfo> {
-    // Try direct path first
-    const directLiquidity = await this.calculateV2LiquidityUSD(
+    // Delegate to findV2Path (which handles caching internally)
+    return this.findV2Path(
       chainId,
       depositToken,
       targetToken,
@@ -314,73 +452,5 @@ export class UniswapV2ResolverService {
       depositTokenPriceUSD,
       targetTokenPriceUSD,
     );
-
-    if (directLiquidity >= 1000) {
-      return {
-        exists: true,
-        liquidityUSD: directLiquidity,
-        path: [depositToken, targetToken],
-      };
-    }
-
-    // Try 2-hop path via WETH (most common intermediate token on Ethereum)
-    const WETH = ASSETS_ADDRS[chainId].WETH as `0x${string}`;
-
-    let depositPrice = depositTokenPriceUSD;
-    if (!depositPrice || depositPrice === 0) {
-      depositPrice = 1;
-    }
-    // Check depositToken -> WETH
-    const depositToWethLiquidity = await this.calculateV2LiquidityUSD(
-      chainId,
-      depositToken,
-      WETH,
-      depositTokenDecimals,
-      18, // WETH decimals
-      depositPrice,
-      null, // WETH price (we'll estimate)
-    );
-
-    // Get WETH price in USDC using Uniswap V2 (needed when targetTokenPriceUSD is null or 0)
-    let wethPrice: number | null = null;
-    if (!targetTokenPriceUSD || targetTokenPriceUSD === 0) {
-      wethPrice = await this.getWETHPriceInUSDC(chainId);
-      if (!wethPrice) {
-        this.logger.warn(
-          'Could not get WETH price in USDC, cannot calculate liquidity for WETH -> targetToken path',
-        );
-      }
-    }
-
-    // Check WETH -> targetToken
-    const wethToTargetLiquidity = await this.calculateV2LiquidityUSD(
-      chainId,
-      WETH,
-      targetToken,
-      18, // WETH decimals
-      targetTokenDecimals,
-      wethPrice, // WETH price in USDC
-      targetTokenPriceUSD,
-    );
-
-    // Take minimum liquidity of the path
-    const twoHopLiquidity = Math.min(
-      depositToWethLiquidity,
-      wethToTargetLiquidity,
-    );
-
-    if (twoHopLiquidity >= 1000) {
-      return {
-        exists: true,
-        liquidityUSD: twoHopLiquidity,
-        path: [depositToken, WETH, targetToken],
-      };
-    }
-
-    return {
-      exists: false,
-      liquidityUSD: 0,
-      path: [],
-    };
   }
 }
