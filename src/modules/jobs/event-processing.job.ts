@@ -1295,35 +1295,18 @@ export class EventProcessingJob {
           const existingAsset = existingAssetsMap.get(tokenLower);
           const tvl = tvlMap.get(tokenLower) ?? '0';
           
-          console.log('updated assets', existingAsset?.symbol || asset.token, 'tvl', tvl, 'existingTvl', existingAsset?.tvl);
-          
           // Build updated asset: start with existing data but explicitly override tvl
           // Order matters: spread existing first, then override with new values
-          const updatedAsset: any = {
+          // Ensure all required fields are present (feed is required in AssetConfig)
+          return {
             // Preserve all existing fields (feed, v2Path, v3Path, v3PoolFee, symbol, decimals)
             ...(existingAsset || {}),
             // Override with new values - these MUST come after the spread
             token: asset.token, // Ensure token is set (normalized)
             targetWeightBps: asset.targetWeightBps, // Update targetWeightBps from vault
-            tvl: tvl, // CRITICAL: Always update TVL with latest value - must be last to override
+            feed: existingAsset?.feed || '', // Ensure feed is always a string (required)
+            tvl: tvl, // Always update TVL with latest value
           };
-          
-          // Explicitly delete old tvl if it exists to ensure clean update
-          // (though setting it after spread should work, this is extra safety)
-          if (existingAsset?.tvl && existingAsset.tvl !== tvl) {
-            console.log(`TVL change detected for ${updatedAsset.symbol || asset.token}: ${existingAsset.tvl} -> ${tvl}`);
-          }
-          
-          // Log the final asset to verify tvl is set
-          console.log('final asset for', updatedAsset.symbol || asset.token, 'tvl:', updatedAsset.tvl);
-          
-          return updatedAsset;
-        });
-
-        // Log what we're about to update
-        console.log('Updating ETF', etf.vault, 'with', updatedAssets.length, 'assets');
-        updatedAssets.forEach((asset, idx) => {
-          console.log(`  Asset ${idx}: ${asset.symbol || asset.token}, tvl: ${asset.tvl}`);
         });
 
         // Fetch the document fresh to avoid stale data
@@ -1340,25 +1323,6 @@ export class EventProcessingJob {
 
         // Save the document - this ensures Mongoose tracks all changes
         await freshEtf.save();
-
-        // Verify the update by fetching again
-        const verifyEtf = await this.etfModel.findById(etf._id);
-        if (verifyEtf) {
-          console.log('ETF updated successfully. Assets in DB:');
-          verifyEtf.assets?.forEach((asset, idx) => {
-            console.log(`  Asset ${idx}: ${asset.symbol || asset.token}, tvl: ${asset.tvl}`);
-          });
-          
-          // Double-check: verify each asset's TVL matches what we sent
-          updatedAssets.forEach((asset, idx) => {
-            const dbAsset = verifyEtf.assets?.[idx];
-            if (dbAsset && dbAsset.tvl !== asset.tvl) {
-              this.logger.warn(
-                `TVL mismatch for asset ${idx} (${asset.symbol || asset.token}): sent ${asset.tvl}, got ${dbAsset.tvl}`,
-              );
-            }
-          });
-        }
 
         this.logger.debug(
           `Updated portfolio for ETF ${etf.vault}: TVL=${portfolio.totalValue}, NAV=${portfolio.nav}`,
