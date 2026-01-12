@@ -667,6 +667,9 @@ export class EventProcessingJob {
 
     // Find all wallets that have deposits in this vault
     try {
+      // Update ETF portfolio (TVL, sharePrice, and asset TVLs) after rebalance
+      await this.updateETFPortfolio(chainId, new Set([etf]));
+    
       const walletHoldings = await this.walletHoldingModel
         .find({
           'deposits.etfVaultAddress': normalizedVault,
@@ -695,7 +698,6 @@ export class EventProcessingJob {
       { $set: { latestRebalanceDate: new Date() } },
     );
 
-    // TODO: save liquidity tvl on the etf
     return true;
   }
 
