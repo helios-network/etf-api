@@ -129,6 +129,62 @@ export class EtfsController {
     }
   }
 
+  @Get('best-swap')
+  async getBestSwap(
+    @Query('chainId') chainId: number,
+    @Query('depositToken') depositToken: string,
+    @Query('targetToken') targetToken: string,
+    @Query('slippageBps') slippageBps?: string,
+  ) {
+    try {
+      if (!chainId) {
+        throw new BadRequestException({
+          success: false,
+          error: 'chainId query parameter is required',
+        });
+      }
+
+      if (!depositToken) {
+        throw new BadRequestException({
+          success: false,
+          error: 'depositToken query parameter is required',
+        });
+      }
+
+      if (!targetToken) {
+        throw new BadRequestException({
+          success: false,
+          error: 'targetToken query parameter is required',
+        });
+      }
+
+      const slippage = slippageBps ? parseInt(slippageBps, 10) : 50;
+
+      const result = await this.etfsService.findBestSwap(
+        chainId,
+        depositToken as `0x${string}`,
+        targetToken as `0x${string}`,
+        slippage,
+      );
+
+      return {
+        success: true,
+        data: result,
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new HttpException(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Post('verify')
   async verifyETF(@Body() body: VerifyEtfDto) {
     try {

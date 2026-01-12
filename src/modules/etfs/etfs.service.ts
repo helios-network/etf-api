@@ -12,9 +12,17 @@ import {
   Web3Service,
   EtfResolverService,
   ChainlinkResolverService,
+  UniswapV2ResolverService,
+  UniswapV3ResolverService,
 } from 'src/services';
 import { ChainId } from 'src/config/web3';
-import { ETF_CONTRACT_ADDRS, MIN_LIQUIDITY_USD } from 'src/constants';
+import {
+  ETF_CONTRACT_ADDRS,
+  MIN_LIQUIDITY_USD,
+  UNISWAP_V2_ROUTER_ADDRS,
+  UNISWAP_V3_ROUTER_ADDRS,
+  UNISWAP_V3_QUOTER_ADDRS,
+} from 'src/constants';
 import {
   VerifyResponse,
   VerifySuccessResponse,
@@ -40,6 +48,8 @@ export class EtfsService {
     private readonly web3Service: Web3Service,
     private readonly etfResolver: EtfResolverService,
     private readonly chainlinkResolver: ChainlinkResolverService,
+    private readonly uniswapV2Resolver: UniswapV2ResolverService,
+    private readonly uniswapV3Resolver: UniswapV3ResolverService,
   ) {}
 
   async getAll(page: number, size: number, search?: string, wallet?: string) {
@@ -616,6 +626,168 @@ export class EtfsService {
     } catch (error) {
       this.logger.error('Error fetching deposit tokens:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Find best swap path between depositToken and targetToken
+   * Returns configuration for setFeeSwapConfig
+   */
+  async findBestSwap(
+    chainId: number,
+    depositToken: `0x${string}`,
+    targetToken: `0x${string}`,
+    slippageBps: number = 50, // Default 0.5% slippage
+  ): Promise<{
+    depositToken: string;
+    enabled: boolean;
+    isV2: boolean;
+    router: string;
+    quoter: string;
+    pathV2: string[];
+    pathV3: string;
+    tokenOut: string;
+    slippageBps: number;
+    liquidityUSD: number;
+  }> {
+    // Get token metadata
+    const [depositTokenMeta, targetTokenMeta] = await Promise.all([
+      this.etfResolver.getTokenMetadata(depositToken, chainId as ChainId),
+      this.etfResolver.getTokenMetadata(targetToken, chainId as ChainId),
+    ]);
+
+    // Get USDC feed for pricing
+    const usdcFeed = await this.chainlinkResolver.resolveUSDCFeed(chainId);
+    const usdcPrice = usdcFeed
+      ? await this.etfResolver.getChainlinkPrice(
+          usdcFeed.proxyAddress as `0x${string}`,
+          usdcFeed.decimals,
+          chainId as ChainId,
+        )
+      : null;
+
+    // Get target token price if available
+    const targetFeed = await this.chainlinkResolver.resolveChainlinkFeed(
+      targetTokenMeta.symbol,
+      chainId,
+    );
+    const targetPrice = targetFeed
+      ? await this.etfResolver.getChainlinkPrice(
+          targetFeed.proxyAddress as `0x${string}`,
+          targetFeed.decimals,
+          chainId as ChainId,
+        )
+      : null;
+
+    // Try V2 path
+    const v2Path = await this.uniswapV2Resolver.findV2Path(
+      chainId,
+      depositToken,
+      targetToken,
+      depositTokenMeta.decimals,
+      targetTokenMeta.decimals,
+      usdcPrice,
+      targetPrice,
+    );
+
+    // Try V3 path
+    const v3Path = await this.uniswapV3Resolver.findV3Path(
+      chainId,
+      depositToken,
+      targetToken,
+      depositTokenMeta.decimals,
+      targetTokenMeta.decimals,
+      usdcPrice,
+      targetPrice,
+    );
+
+    // Determine best path (highest liquidity)
+    const useV2 =
+      v2Path.exists &&
+      v2Path.liquidityUSD >= MIN_LIQUIDITY_USD &&
+      (!v3Path.exists ||
+        v2Path.liquidityUSD >= v3Path.liquidityUSD);
+
+    const useV3 =
+      v3Path.exists &&
+      v3Path.liquidityUSD >= MIN_LIQUIDITY_USD &&
+      (!v2Path.exists ||
+        v3Path.liquidityUSD > v2Path.liquidityUSD);
+
+    if (!useV2 && !useV3) {
+      throw new Error(
+        `No valid swap path found between ${depositTokenMeta.symbol} and ${targetTokenMeta.symbol} with sufficient liquidity (min: $${MIN_LIQUIDITY_USD})`,
+      );
+    }
+
+    if (useV2) {
+      // Prepare V2 path
+      const router = UNISWAP_V2_ROUTER_ADDRS[chainId];
+      if (!router) {
+        throw new Error(`Uniswap V2 router not found for chainId ${chainId}`);
+      }
+
+      return {
+        depositToken: depositToken,
+        enabled: true,
+        isV2: true,
+        router: router,
+        quoter: '0x0000000000000000000000000000000000000000', // V2 doesn't use quoter
+        pathV2: v2Path.path,
+        pathV3: '0x', // Empty bytes for V2
+        tokenOut: targetToken,
+        slippageBps: slippageBps,
+        liquidityUSD: v2Path.liquidityUSD,
+      };
+    } else {
+      // Prepare V3 path
+      const router = UNISWAP_V3_ROUTER_ADDRS[chainId];
+      const quoter = UNISWAP_V3_QUOTER_ADDRS[chainId];
+      if (!router || !quoter) {
+        throw new Error(
+          `Uniswap V3 router or quoter not found for chainId ${chainId}`,
+        );
+      }
+
+      // Get WETH address for V3 via paths
+      const { ASSETS_ADDRS } = require('src/constants');
+      const WETH = ASSETS_ADDRS[chainId]?.WETH;
+      if (!WETH) {
+        throw new Error(`WETH address not found for chainId ${chainId}`);
+      }
+
+      // Encode V3 path
+      let pathV3Bytes: string;
+      if (v3Path.isDirect && v3Path.fee) {
+        pathV3Bytes = this.uniswapV3Resolver.encodeV3Path(
+          depositToken,
+          v3Path.fee,
+          targetToken,
+        );
+      } else if (v3Path.depositToWethFee && v3Path.wethToTargetFee) {
+        pathV3Bytes = this.uniswapV3Resolver.encodeV3Path(
+          depositToken,
+          v3Path.depositToWethFee,
+          WETH as `0x${string}`,
+          v3Path.wethToTargetFee,
+          targetToken,
+        );
+      } else {
+        throw new Error('Invalid V3 path configuration');
+      }
+
+      return {
+        depositToken: depositToken,
+        enabled: true,
+        isV2: false,
+        router: router,
+        quoter: quoter,
+        pathV2: [], // Empty array for V3
+        pathV3: pathV3Bytes,
+        tokenOut: targetToken,
+        slippageBps: slippageBps,
+        liquidityUSD: v3Path.liquidityUSD,
+      };
     }
   }
 }
