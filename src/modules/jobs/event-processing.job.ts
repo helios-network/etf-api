@@ -1326,29 +1326,38 @@ export class EventProcessingJob {
           console.log(`  Asset ${idx}: ${asset.symbol || asset.token}, tvl: ${asset.tvl}`);
         });
 
-        // Update ETF using findOneAndUpdate to ensure we get the latest document
-        // Note: portfolio.totalValue is a string, but tvl in schema is Number
-        // MongoDB will convert string to number automatically
-        const updateResult = await this.etfModel.findOneAndUpdate(
-          { _id: etf._id },
-          {
-            $set: {
-              tvl: Number(portfolio.totalValue),
-              sharePrice: Number(portfolio.nav),
-              'assets': updatedAssets, // Explicitly set the entire assets array
-            },
-          },
-          { new: true, runValidators: true }, // Return updated document and run validators
-        );
+        // Fetch the document fresh to avoid stale data
+        const freshEtf = await this.etfModel.findById(etf._id);
+        if (!freshEtf) {
+          this.logger.warn(`ETF ${etf.vault} not found for update`);
+          return;
+        }
 
-        // Verify the update
-        if (updateResult) {
+        // Update the document in memory
+        freshEtf.tvl = Number(portfolio.totalValue);
+        freshEtf.sharePrice = Number(portfolio.nav);
+        freshEtf.assets = updatedAssets;
+
+        // Save the document - this ensures Mongoose tracks all changes
+        await freshEtf.save();
+
+        // Verify the update by fetching again
+        const verifyEtf = await this.etfModel.findById(etf._id);
+        if (verifyEtf) {
           console.log('ETF updated successfully. Assets in DB:');
-          updateResult.assets?.forEach((asset, idx) => {
+          verifyEtf.assets?.forEach((asset, idx) => {
             console.log(`  Asset ${idx}: ${asset.symbol || asset.token}, tvl: ${asset.tvl}`);
           });
-        } else {
-          this.logger.warn(`Failed to update ETF ${etf.vault} - document not found`);
+          
+          // Double-check: verify each asset's TVL matches what we sent
+          updatedAssets.forEach((asset, idx) => {
+            const dbAsset = verifyEtf.assets?.[idx];
+            if (dbAsset && dbAsset.tvl !== asset.tvl) {
+              this.logger.warn(
+                `TVL mismatch for asset ${idx} (${asset.symbol || asset.token}): sent ${asset.tvl}, got ${dbAsset.tvl}`,
+              );
+            }
+          });
         }
 
         this.logger.debug(
