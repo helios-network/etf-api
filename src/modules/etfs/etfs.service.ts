@@ -22,6 +22,7 @@ import {
   UNISWAP_V2_ROUTER_ADDRS,
   UNISWAP_V3_ROUTER_ADDRS,
   UNISWAP_V3_QUOTER_ADDRS,
+  ASSETS_ADDRS,
 } from 'src/constants';
 import {
   VerifyResponse,
@@ -750,7 +751,6 @@ export class EtfsService {
       }
 
       // Get WETH address for V3 via paths
-      const { ASSETS_ADDRS } = require('src/constants');
       const WETH = ASSETS_ADDRS[chainId]?.WETH;
       if (!WETH) {
         throw new Error(`WETH address not found for chainId ${chainId}`);
