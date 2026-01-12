@@ -1309,20 +1309,13 @@ export class EventProcessingJob {
           };
         });
 
-        // Fetch the document fresh to avoid stale data
-        const freshEtf = await this.etfModel.findById(etf._id);
-        if (!freshEtf) {
-          this.logger.warn(`ETF ${etf.vault} not found for update`);
-          return;
-        }
-
         // Update the document in memory
-        freshEtf.tvl = Number(portfolio.totalValue);
-        freshEtf.sharePrice = Number(portfolio.nav);
-        freshEtf.assets = updatedAssets;
+        etf.tvl = Number(portfolio.totalValue);
+        etf.sharePrice = Number(portfolio.nav);
+        etf.assets = updatedAssets;
 
         // Save the document - this ensures Mongoose tracks all changes
-        await freshEtf.save();
+        await etf.save();
 
         this.logger.debug(
           `Updated portfolio for ETF ${etf.vault}: TVL=${portfolio.totalValue}, NAV=${portfolio.nav}`,
