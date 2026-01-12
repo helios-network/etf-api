@@ -10,6 +10,8 @@ import {
   Param,
 } from '@nestjs/common';
 import { EtfPriceChartService } from 'src/services/etf-price-chart.service';
+import { ETF_CONTRACT_ADDRS } from 'src/constants';
+import { ChainId } from 'src/config/web3';
 
 import { EtfsService } from './etfs.service';
 import { VerifyEtfDto } from './dto/verify-etf.dto';
@@ -79,6 +81,44 @@ export class EtfsController {
     try {
       return await this.etfsService.getDepositTokens(chainId, search);
     } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('factory')
+  async getFactory(@Query('chainId') chainId: number) {
+    try {
+      if (!chainId) {
+        throw new BadRequestException({
+          success: false,
+          error: 'chainId query parameter is required',
+        });
+      }
+
+      const chainIdEnum = chainId as ChainId;
+      const factoryAddress = ETF_CONTRACT_ADDRS[chainIdEnum];
+
+      if (!factoryAddress) {
+        throw new BadRequestException({
+          success: false,
+          error: `No factory address found for chainId ${chainId}`,
+        });
+      }
+
+      return {
+        success: true,
+        address: factoryAddress,
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       throw new HttpException(
         {
           success: false,
