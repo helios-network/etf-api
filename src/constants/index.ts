@@ -23,13 +23,13 @@ export const AUTORIZED_DEPOSIT_TOKENS = {
 }
 
 export const ETF_CONTRACT_ADDRS = {
-  [ChainId.MAINNET]: '0x3EC2D623411B70beb9878A50A541775eE8e8034C',
-  [ChainId.ARBITRUM]: '0xe36F7f59ce3b2377E5c7Ca2FF83c0b4e0a116e27',
+  [ChainId.MAINNET]: '0x28e463306BdC20E6dc52B2833422F6525436CE4d',
+  [ChainId.ARBITRUM]: '0xfc84CDbCdAC1fD34add319Be12926fe3cf44b366',
 };
 
 export const DEFAULT_START_BLOCKS = {
-  [ChainId.MAINNET]: BigInt(24072858),
-  [ChainId.ARBITRUM]: BigInt(413542428),
+  [ChainId.MAINNET]: BigInt(24215297),
+  [ChainId.ARBITRUM]: BigInt(420414723),
 };
 
 // Uniswap V2 addresses (Ethereum Mainnet)
