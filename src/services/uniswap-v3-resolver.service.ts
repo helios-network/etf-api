@@ -4,11 +4,11 @@ import {
   UNISWAP_V3_FACTORY_ADDRS,
   UNISWAP_V3_FEES,
   MIN_LIQUIDITY_USD,
-  ASSETS_ADDRS,
-} from '../constants';
-import { V3PoolInfo, V3PathInfo } from '../types/etf-verify.types';
+} from 'src/constants';
+import { V3PoolInfo, V3PathInfo } from 'src/types/etf-verify.types';
+import { ChainId } from 'src/config/web3';
+
 import { RpcClientService } from './rpc-client/rpc-client.service';
-import { ChainId } from '../config/web3';
 import {
   PoolResolver,
   PathCandidate,
@@ -53,7 +53,10 @@ export class UniswapV3ResolverService implements PoolResolver<V3PathInfo> {
   // Cache for path results (stable keys, no price dependencies)
   private pathCache = new Map<string, V3PathInfo>();
   // Cache for liquidity calculations
-  private liquidityCache = new Map<string, { value: number; timestamp: number }>();
+  private liquidityCache = new Map<
+    string,
+    { value: number; timestamp: number }
+  >();
   private readonly LIQUIDITY_CACHE_TTL_MS = 60000; // 60 seconds
 
   constructor(private readonly rpcClientService: RpcClientService) {}
@@ -544,7 +547,9 @@ export class UniswapV3ResolverService implements PoolResolver<V3PathInfo> {
     const [tokenA, tokenB] = [depositToken, targetToken].map((t) =>
       t.toLowerCase(),
     );
-    const cacheKey = `v3-${chainId}-${tokenA < tokenB ? `${tokenA}-${tokenB}` : `${tokenB}-${tokenA}`}`;
+    const cacheKey = `v3-${chainId}-${
+      tokenA < tokenB ? `${tokenA}-${tokenB}` : `${tokenB}-${tokenA}`
+    }`;
 
     // Check cache
     if (this.pathCache.has(cacheKey)) {

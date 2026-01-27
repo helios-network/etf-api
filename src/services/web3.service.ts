@@ -8,9 +8,13 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet, arbitrum } from 'viem/chains';
-import { ChainId } from '../config/web3';
+import { ChainId } from 'src/config/web3';
+
 import { RpcRotationService } from './rpc-rate-limit/rpc-rotation.service';
-import { createRotatingTransport, createTransportWithSpecificRpc } from './rpc-rate-limit/transport-wrapper';
+import {
+  createRotatingTransport,
+  createTransportWithSpecificRpc,
+} from './rpc-rate-limit/transport-wrapper';
 
 @Injectable()
 export class Web3Service {
@@ -70,7 +74,7 @@ export class Web3Service {
 
     const privateKey = this.configService.get<string>('PRIVATE_KEY');
     const nodeEnv = this.configService.get<string>('nodeEnv', 'development');
-    
+
     if (privateKey) {
       this.privateKey = privateKey as `0x${string}`;
     } else {

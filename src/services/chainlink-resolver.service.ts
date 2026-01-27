@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { ChainlinkDataFeed, ChainlinkDataFeedDocument } from '../models/chainlink-data-feed.schema';
-import { ChainlinkFeed } from '../types/etf-verify.types';
+import { ChainlinkDataFeed, ChainlinkDataFeedDocument } from 'src/models';
+import { ChainlinkFeed } from 'src/types/etf-verify.types';
 
 @Injectable()
 export class ChainlinkResolverService {
@@ -45,7 +45,10 @@ export class ChainlinkResolverService {
         decimals: feed.decimals,
       };
     } catch (error) {
-      this.logger.error(`Error resolving Chainlink feed for ${tokenSymbol}:`, error);
+      this.logger.error(
+        `Error resolving Chainlink feed for ${tokenSymbol}:`,
+        error,
+      );
       return null;
     }
   }

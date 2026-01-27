@@ -1,7 +1,5 @@
-import { Controller, Get, Post, Body, Query, BadRequestException, HttpException, HttpStatus, Param } from '@nestjs/common';
+import { Controller, Get, Query, BadRequestException, HttpException, HttpStatus, } from '@nestjs/common';
 import { EtfPriceChartService } from 'src/services/etf-price-chart.service';
-import { ETF_CONTRACT_ADDRS } from 'src/constants';
-import { ChainId } from 'src/config/web3';
 
 import { EtfPredictionService } from './etf-prediction.service';
 
