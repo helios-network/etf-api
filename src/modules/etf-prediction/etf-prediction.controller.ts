@@ -1,11 +1,21 @@
-import { Controller, Get, Query, BadRequestException, HttpException, HttpStatus, } from '@nestjs/common';
-import { EtfPriceChartService } from 'src/services/etf-price-chart.service';
+import {
+  Controller,
+  Get,
+  Query,
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
+import { EtfPriceChartService } from 'src/services';
 
 import { EtfPredictionService } from './etf-prediction.service';
 
 @Controller('etf-prediction')
 export class EtfPredictionController {
-  constructor(private readonly etfPredictionService: EtfPredictionService, private readonly etfPriceChartService: EtfPriceChartService) { }
+  constructor(
+    private readonly etfPredictionService: EtfPredictionService,
+    private readonly etfPriceChartService: EtfPriceChartService,
+  ) {}
 
   @Get()
   async getAll(@Query('vault') vault: string) {

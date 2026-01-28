@@ -9,7 +9,7 @@ import {
   HttpStatus,
   Param,
 } from '@nestjs/common';
-import { EtfPriceChartService } from 'src/services/etf-price-chart.service';
+import { EtfPriceChartService } from 'src/services';
 import { ETF_CONTRACT_ADDRS } from 'src/constants';
 import { ChainId } from 'src/config/web3';
 

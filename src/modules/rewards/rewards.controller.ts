@@ -7,6 +7,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
+
 import { RewardsService } from './rewards.service';
 import { ClaimRewardDto } from './dto/claim-reward.dto';
 

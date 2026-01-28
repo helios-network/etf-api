@@ -1,4 +1,4 @@
-import { ChainId } from '../../../config/web3';
+import { ChainId } from 'src/config/web3';
 
 export interface RpcRateLimitConfig {
   maxRequests: number;
