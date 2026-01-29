@@ -8,8 +8,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { EtfVolumeService } from 'src/services';
-
-import { VolumeSyncJob } from '../jobs/volume-sync.job';
+import { handleError } from 'src/utils/error';
+import { VolumeSyncJob } from 'src/modules/jobs/volume-sync.job';
 
 @Controller('admin')
 export class AdminController {
@@ -31,13 +31,7 @@ export class AdminController {
         message: 'Volume resynchronization started',
       };
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -54,13 +48,7 @@ export class AdminController {
         },
       };
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -73,13 +61,7 @@ export class AdminController {
         message: 'Transaction counts resynchronization started',
       };
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -98,13 +80,7 @@ export class AdminController {
         },
       };
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -117,13 +93,7 @@ export class AdminController {
         message: 'Transaction counts and points resynchronization started',
       };
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -143,13 +113,7 @@ export class AdminController {
         },
       };
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -162,13 +126,7 @@ export class AdminController {
         message: 'Daily volumes cleanup completed',
       };
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -214,13 +172,7 @@ export class AdminController {
         },
       };
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 }
