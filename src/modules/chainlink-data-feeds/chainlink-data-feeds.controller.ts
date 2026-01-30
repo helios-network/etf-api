@@ -3,17 +3,16 @@ import {
   Get,
   Post,
   Query,
-  BadRequestException,
-  HttpException,
-  HttpStatus,
 } from '@nestjs/common';
+import { handleError } from 'src/utils/error';
+
 import { ChainlinkDataFeedsService } from './chainlink-data-feeds.service';
 
 @Controller('chainlinkDataFeeds')
 export class ChainlinkDataFeedsController {
   constructor(
     private readonly chainlinkDataFeedsService: ChainlinkDataFeedsService,
-  ) {}
+  ) { }
 
   @Get()
   async getAll(
@@ -40,19 +39,7 @@ export class ChainlinkDataFeedsController {
 
       return result;
     } catch (error) {
-      if (error instanceof Error && error.message.includes('must be')) {
-        throw new BadRequestException({
-          success: false,
-          error: error.message,
-        });
-      }
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -61,13 +48,7 @@ export class ChainlinkDataFeedsController {
     try {
       return await this.chainlinkDataFeedsService.reloadFeeds();
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 }

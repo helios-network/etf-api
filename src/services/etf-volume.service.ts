@@ -1,13 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { EtfVolume, EtfVolumeDocument } from '../models/etf-volume.schema';
 import {
+  EtfVolume,
+  EtfVolumeDocument,
   EtfPriceChart,
   EtfPriceChartDocument,
-} from '../models/etf-price-chart.schema';
-import { ETF, ETFDocument } from '../models/etf.schema';
-import { normalizeEthAddress } from '../common/utils/eip55';
+  ETF,
+  ETFDocument,
+} from 'src/models';
+import { normalizeEthAddress } from 'src/common/utils/eip55';
 
 @Injectable()
 export class EtfVolumeService {
@@ -177,7 +179,12 @@ export class EtfVolumeService {
           let priceChange7d = 0;
           let priceChange30d = 0;
 
-          if (currentPrice > 0 && priceChart && priceChart.entries && priceChart.entries.length > 0) {
+          if (
+            currentPrice > 0 &&
+            priceChart &&
+            priceChart.entries &&
+            priceChart.entries.length > 0
+          ) {
             const sortedEntries = [...priceChart.entries].sort(
               (a, b) => a.timestamp - b.timestamp,
             );
@@ -291,4 +298,3 @@ export class EtfVolumeService {
     return dailyVolume;
   }
 }
-

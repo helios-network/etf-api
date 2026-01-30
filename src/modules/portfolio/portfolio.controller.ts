@@ -6,11 +6,13 @@ import {
   HttpStatus,
   BadRequestException,
 } from '@nestjs/common';
+import { handleError } from 'src/utils/error';
+
 import { PortfolioService } from './portfolio.service';
 
 @Controller('portfolio')
 export class PortfolioController {
-  constructor(private readonly portfolioService: PortfolioService) {}
+  constructor(private readonly portfolioService: PortfolioService) { }
 
   /**
    * Validate Ethereum address format
@@ -46,17 +48,7 @@ export class PortfolioController {
         data: result.data,
       };
     } catch (error) {
-      if (error instanceof BadRequestException || error instanceof HttpException) {
-        throw error;
-      }
-      throw new HttpException(
-        {
-          success: false,
-          error:
-            error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 }

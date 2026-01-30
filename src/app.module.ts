@@ -20,6 +20,7 @@ import { JobsModule } from './modules/jobs/jobs.module';
 // import { AdminModule } from './modules/admin/admin.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { EtfPredictionModule } from './modules/etf-prediction/etf-prediction.module';
 
 function shouldLoadJobsModules(): boolean {
   if (typeof cluster !== 'undefined' && cluster.isPrimary !== undefined) {
@@ -48,6 +49,7 @@ function shouldLoadJobsModules(): boolean {
     HealthModule,
     RewardsModule,
     EtfsModule,
+    EtfPredictionModule,
     ChainlinkDataFeedsModule,
     LeaderBoardModule,
     PortfolioModule,
@@ -68,4 +70,4 @@ function shouldLoadJobsModules(): boolean {
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }

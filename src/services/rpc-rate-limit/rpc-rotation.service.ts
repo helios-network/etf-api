@@ -1,17 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { http, type HttpTransport } from 'viem';
-import { ChainId } from '../../config/web3';
+import { ChainId } from 'src/config/web3';
+
 import { RpcHealthConfig, RpcHealthState } from './interfaces';
 import { RpcRetryConfig } from './interfaces/rpc-rate-limit.interface';
 
 @Injectable()
 export class RpcRotationService {
   private readonly logger = new Logger(RpcRotationService.name);
-  
+
   private readonly healthStates: Map<string, RpcHealthState> = new Map();
   private readonly transportPool: Map<string, HttpTransport> = new Map();
-  
+
   private readonly rpcUrls: Record<ChainId, string[]>;
   private readonly healthConfig: RpcHealthConfig;
   private readonly retryConfig: RpcRetryConfig;
@@ -19,18 +20,18 @@ export class RpcRotationService {
   constructor(private readonly configService: ConfigService) {
     const appConfig = this.configService.get<any>('rpcUrls');
     const rpcConfig = this.configService.get<any>('rpc');
-    
+
     this.rpcUrls = appConfig || {
       [ChainId.MAINNET]: ['https://ethereum-rpc.publicnode.com'],
       [ChainId.ARBITRUM]: ['https://arbitrum-one-rpc.publicnode.com'],
     };
-    
+
     this.healthConfig = rpcConfig?.health || {
       maxConsecutiveErrors: 3,
       rateLimitCooldownMs: 60000,
       errorRecoveryDelayMs: 60000,
     };
-    
+
     this.retryConfig = rpcConfig?.retry || {
       maxRetries: 5,
       baseDelay: 1000,
@@ -40,7 +41,9 @@ export class RpcRotationService {
     // Log des RPCs chargés pour vérification
     for (const [chainId, urls] of Object.entries(this.rpcUrls)) {
       this.logger.log(
-        `Loaded ${urls.length} RPC URL(s) for chain ${chainId}: ${urls.join(', ')}`,
+        `Loaded ${urls.length} RPC URL(s) for chain ${chainId}: ${urls.join(
+          ', ',
+        )}`,
       );
     }
 
@@ -71,19 +74,22 @@ export class RpcRotationService {
   isRpcHealthy(url: string, chainId: ChainId): boolean {
     const key = this.getHealthKey(chainId, url);
     const state = this.healthStates.get(key);
-    
+
     if (!state) {
       return false;
     }
 
     const now = Date.now();
-    
+
     if (state.rateLimitedUntil && now < state.rateLimitedUntil) {
       return false;
     }
 
     if (state.consecutiveErrors >= this.healthConfig.maxConsecutiveErrors) {
-      if (state.lastError && now - state.lastError < this.healthConfig.errorRecoveryDelayMs) {
+      if (
+        state.lastError &&
+        now - state.lastError < this.healthConfig.errorRecoveryDelayMs
+      ) {
         return false;
       }
       state.consecutiveErrors = 0;
@@ -100,7 +106,8 @@ export class RpcRotationService {
       return null;
     }
 
-    const healthyRpc = urls.filter((url) => excludeUrl ? url !== excludeUrl : true)
+    const healthyRpc = urls
+      .filter((url) => (excludeUrl ? url !== excludeUrl : true))
       .map((url) => ({
         url,
         state: this.healthStates.get(this.getHealthKey(chainId, url)),
@@ -124,7 +131,9 @@ export class RpcRotationService {
         .filter(({ state }) => state !== undefined);
 
       if (fallbackRpc.length === 0) {
-        this.logger.debug(`Using first available RPC for chain ${chainId}: ${urls[0]}`);
+        this.logger.debug(
+          `Using first available RPC for chain ${chainId}: ${urls[0]}`,
+        );
         return urls[0];
       }
 
@@ -157,9 +166,11 @@ export class RpcRotationService {
   recordSuccess(url: string, chainId: ChainId): void {
     const key = this.getHealthKey(chainId, url);
     const state = this.healthStates.get(key);
-    
+
     if (!state) {
-      this.logger.warn(`No health state found for RPC ${url} on chain ${chainId}`);
+      this.logger.warn(
+        `No health state found for RPC ${url} on chain ${chainId}`,
+      );
       return;
     }
 
@@ -172,15 +183,18 @@ export class RpcRotationService {
   recordError(url: string, chainId: ChainId, error?: Error): void {
     const key = this.getHealthKey(chainId, url);
     const state = this.healthStates.get(key);
-    
+
     if (!state) {
-      this.logger.warn(`No health state found for RPC ${url} on chain ${chainId}`);
+      this.logger.warn(
+        `No health state found for RPC ${url} on chain ${chainId}`,
+      );
       return;
     }
 
     state.consecutiveErrors++;
     state.lastError = Date.now();
-    state.isHealthy = state.consecutiveErrors < this.healthConfig.maxConsecutiveErrors;
+    state.isHealthy =
+      state.consecutiveErrors < this.healthConfig.maxConsecutiveErrors;
 
     if (!state.isHealthy) {
       this.logger.warn(
@@ -192,18 +206,22 @@ export class RpcRotationService {
   recordRateLimit(url: string, chainId: ChainId): void {
     const key = this.getHealthKey(chainId, url);
     const state = this.healthStates.get(key);
-    
+
     if (!state) {
-      this.logger.warn(`No health state found for RPC ${url} on chain ${chainId}`);
+      this.logger.warn(
+        `No health state found for RPC ${url} on chain ${chainId}`,
+      );
       return;
     }
 
     const now = Date.now();
     state.rateLimitedUntil = now + this.healthConfig.rateLimitCooldownMs;
     state.lastUsed = now;
-    
+
     this.logger.debug(
-      `RPC ${url} on chain ${chainId} rate-limited until ${new Date(state.rateLimitedUntil).toISOString()}`,
+      `RPC ${url} on chain ${chainId} rate-limited until ${new Date(
+        state.rateLimitedUntil,
+      ).toISOString()}`,
     );
   }
 

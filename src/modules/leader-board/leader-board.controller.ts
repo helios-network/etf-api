@@ -2,14 +2,14 @@ import {
   Controller,
   Get,
   Query,
-  HttpException,
-  HttpStatus,
 } from '@nestjs/common';
+import { handleError } from 'src/utils/error';
+
 import { LeaderBoardService } from './leader-board.service';
 
 @Controller('leaderBoard')
 export class LeaderBoardController {
-  constructor(private readonly leaderBoardService: LeaderBoardService) {}
+  constructor(private readonly leaderBoardService: LeaderBoardService) { }
 
   @Get()
   async getLeaderBoard(
@@ -31,13 +31,7 @@ export class LeaderBoardController {
         orderField,
       );
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 }

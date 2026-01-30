@@ -5,10 +5,11 @@ import {
   UNISWAP_V2_FACTORY_ADDRS,
   UNISWAP_V2_ROUTER_ADDRS,
   MIN_LIQUIDITY_USD,
-} from '../constants';
-import { V2PoolInfo } from '../types/etf-verify.types';
+} from 'src/constants';
+import { V2PoolInfo } from 'src/types/etf-verify.types';
 import { RpcClientService } from './rpc-client/rpc-client.service';
-import { ChainId } from '../config/web3';
+import { ChainId } from 'src/config/web3';
+
 import {
   PoolResolver,
   PathCandidate,
@@ -51,7 +52,10 @@ export class UniswapV2ResolverService implements PoolResolver<string[]> {
   // Cache for path results (stable keys, no price dependencies)
   private pathCache = new Map<string, V2PoolInfo>();
   // Cache for liquidity calculations (TTL: 30-120s in production, but we use simple Map for now)
-  private liquidityCache = new Map<string, { value: number; timestamp: number }>();
+  private liquidityCache = new Map<
+    string,
+    { value: number; timestamp: number }
+  >();
   private readonly LIQUIDITY_CACHE_TTL_MS = 60000; // 60 seconds
 
   constructor(private readonly rpcClientService: RpcClientService) {}
@@ -204,7 +208,9 @@ export class UniswapV2ResolverService implements PoolResolver<string[]> {
 
         const amountOut = amountsOut[1] as bigint;
         const amountInFormatted = Number(formatUnits(amountIn, tokenADecimals));
-        const amountOutFormatted = Number(formatUnits(amountOut, tokenBDecimals));
+        const amountOutFormatted = Number(
+          formatUnits(amountOut, tokenBDecimals),
+        );
         const priceRatio = amountOutFormatted / amountInFormatted;
 
         // If we have price for tokenB, calculate liquidity
@@ -332,7 +338,10 @@ export class UniswapV2ResolverService implements PoolResolver<string[]> {
     let effectiveMidPrice = midPriceUSD;
     if (!effectiveMidPrice || effectiveMidPrice === 0) {
       // Try to get WETH price if midToken is WETH
-      if (midToken.toLowerCase() === ASSETS_ADDRS[meta.chainId]?.WETH?.toLowerCase()) {
+      if (
+        midToken.toLowerCase() ===
+        ASSETS_ADDRS[meta.chainId]?.WETH?.toLowerCase()
+      ) {
         effectiveMidPrice = await this.getWETHPriceInUSDC(meta.chainId);
       }
       // If still no price, use a fallback (1 USD) to allow calculation
@@ -388,7 +397,9 @@ export class UniswapV2ResolverService implements PoolResolver<string[]> {
     const [tokenA, tokenB] = [depositToken, targetToken].map((t) =>
       t.toLowerCase(),
     );
-    const cacheKey = `v2-${chainId}-${tokenA < tokenB ? `${tokenA}-${tokenB}` : `${tokenB}-${tokenA}`}`;
+    const cacheKey = `v2-${chainId}-${
+      tokenA < tokenB ? `${tokenA}-${tokenB}` : `${tokenB}-${tokenA}`
+    }`;
 
     // Check cache
     if (this.pathCache.has(cacheKey)) {

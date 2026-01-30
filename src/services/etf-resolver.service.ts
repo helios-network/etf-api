@@ -1,18 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { erc20Abi, encodeAbiParameters, formatUnits } from 'viem';
-import { ASSETS_ADDRS, MIN_LIQUIDITY_USD } from '../constants';
-import { ChainlinkResolverService } from './chainlink-resolver.service';
-import { UniswapV2ResolverService } from './uniswap-v2-resolver.service';
-import { UniswapV3ResolverService } from './uniswap-v3-resolver.service';
-import { RpcClientService } from './rpc-client/rpc-client.service';
-import { ChainId } from '../config/web3';
+import { ASSETS_ADDRS, MIN_LIQUIDITY_USD } from 'src/constants';
+import { ChainId } from 'src/config/web3';
 import {
   TokenMetadata,
   ResolutionResult,
   PricingMode,
   DepositPath,
   WithdrawPath,
-} from '../types/etf-verify.types';
+} from 'src/types/etf-verify.types';
+
+import { ChainlinkResolverService } from './chainlink-resolver.service';
+import { UniswapV2ResolverService } from './uniswap-v2-resolver.service';
+import { UniswapV3ResolverService } from './uniswap-v3-resolver.service';
+import { RpcClientService } from './rpc-client/rpc-client.service';
 
 @Injectable()
 export class EtfResolverService {
@@ -61,7 +62,9 @@ export class EtfResolverService {
         decimals: Number(decimals),
       };
     } catch (error) {
-      throw new Error(`Failed to fetch token metadata for ${tokenAddress}: ${error}`);
+      throw new Error(
+        `Failed to fetch token metadata for ${tokenAddress}: ${error}`,
+      );
     }
   }
 
@@ -102,7 +105,10 @@ export class EtfResolverService {
       // Use formatUnits for safe bigint to number conversion (consistent with pathfinder refactor)
       return Number(formatUnits(answer, decimals));
     } catch (error) {
-      this.logger.error(`Error fetching Chainlink price from ${feedAddress}:`, error);
+      this.logger.error(
+        `Error fetching Chainlink price from ${feedAddress}:`,
+        error,
+      );
       return null;
     }
   }
@@ -297,7 +303,10 @@ export class EtfResolverService {
           throw new Error('V2_PLUS_FEED: Insufficient liquidity');
         }
         const withdrawPathFeed = [...v2PathFeed.path].reverse();
-        const encodedFeed = this.encodeV2Paths(v2PathFeed.path, withdrawPathFeed);
+        const encodedFeed = this.encodeV2Paths(
+          v2PathFeed.path,
+          withdrawPathFeed,
+        );
         return {
           pricingMode: 'V2_PLUS_FEED',
           feed: targetFeed,

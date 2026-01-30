@@ -5,16 +5,15 @@ import {
   decodeFunctionResult,
   erc20Abi,
 } from 'viem';
+import { ChainId } from 'src/config/web3';
+
 import { RpcClientService } from './rpc-client/rpc-client.service';
-import { ChainId } from '../config/web3';
 
 @Injectable()
 export class VaultUtilsService {
   private readonly logger = new Logger(VaultUtilsService.name);
 
-  constructor(
-    private readonly rpcClientService: RpcClientService,
-  ) {}
+  constructor(private readonly rpcClientService: RpcClientService) {}
   /**
    * Fetch vault configuration from blockchain
    */
@@ -112,40 +111,42 @@ export class VaultUtilsService {
       ),
     ]);
 
-    const rawPricerResults = await this.rpcClientService.execute(chainId, (client) =>
-      client.call({
-        to: pricer,
-        data: encodeFunctionData({
-          abi: [
-            {
-              type: 'function',
-              name: 'getAssets',
-              inputs: [],
-              outputs: [
-                {
-                  type: 'tuple[]',
-                  components: [
-                    { name: 'token', type: 'address' },
-                    { name: 'feed', type: 'address' },
-                    { name: 'v2Path', type: 'address[]' },
-                    { name: 'v3Path', type: 'bytes' },
-                    { name: 'v3PoolFee', type: 'uint24' },
-                  ],
-                },
-              ],
-              stateMutability: 'view',
-            },
-          ],
-          functionName: 'getAssets',
-          args: [],
+    const rawPricerResults = await this.rpcClientService.execute(
+      chainId,
+      (client) =>
+        client.call({
+          to: pricer,
+          data: encodeFunctionData({
+            abi: [
+              {
+                type: 'function',
+                name: 'getAssets',
+                inputs: [],
+                outputs: [
+                  {
+                    type: 'tuple[]',
+                    components: [
+                      { name: 'token', type: 'address' },
+                      { name: 'feed', type: 'address' },
+                      { name: 'v2Path', type: 'address[]' },
+                      { name: 'v3Path', type: 'bytes' },
+                      { name: 'v3PoolFee', type: 'uint24' },
+                    ],
+                  },
+                ],
+                stateMutability: 'view',
+              },
+            ],
+            functionName: 'getAssets',
+            args: [],
+          }),
         }),
-      }),
     );
-  
+
     if (!rawPricerResults.data) {
       throw new Error('No data returned');
     }
-  
+
     const assetsPricerResults = decodeFunctionResult({
       abi: [
         {
@@ -234,7 +235,7 @@ export class VaultUtilsService {
       [0, 'V2_PLUS_FEED'],
       [1, 'V3_PLUS_FEED'],
       [2, 'V2_PLUS_V2'],
-      [3, 'V3_PLUS_V3']
+      [3, 'V3_PLUS_V3'],
     ]);
 
     const pricingModeString = pricingModeMap.get(Number(pricingMode)) || '';
@@ -369,10 +370,12 @@ export class VaultUtilsService {
   async fetchVaultAssetsOnly(
     vaultAddress: `0x${string}`,
     chainId: ChainId,
-  ): Promise<Array<{
-    token: string;
-    targetWeightBps: number;
-  }>> {
+  ): Promise<
+    Array<{
+      token: string;
+      targetWeightBps: number;
+    }>
+  > {
     // Fetch assets from vault only
     const raw = await this.rpcClientService.execute(chainId, (client) =>
       client.call({

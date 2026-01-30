@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { http, type HttpTransport } from 'viem';
-import { ChainId } from '../../config/web3';
+import { ChainId } from 'src/config/web3';
+
 import { RpcRetryConfig } from './interfaces';
 import { RpcRotationService } from './rpc-rotation.service';
 
@@ -12,11 +13,17 @@ function requiresFailover(error: unknown): boolean {
   }
 
   const errorObj = error as any;
-  
-  if (errorObj.status === 429 || errorObj.statusCode === 429 ||
-      errorObj.status === 402 || errorObj.statusCode === 402 ||
-      errorObj.status === 401 || errorObj.statusCode === 401 ||
-      errorObj.status === 403 || errorObj.statusCode === 403) {
+
+  if (
+    errorObj.status === 429 ||
+    errorObj.statusCode === 429 ||
+    errorObj.status === 402 ||
+    errorObj.statusCode === 402 ||
+    errorObj.status === 401 ||
+    errorObj.statusCode === 401 ||
+    errorObj.status === 403 ||
+    errorObj.statusCode === 403
+  ) {
     return true;
   }
 
@@ -28,7 +35,10 @@ function requiresFailover(error: unknown): boolean {
     errorObj.shortMessage,
     errorObj.reason,
     JSON.stringify(errorObj),
-  ].filter(Boolean).join(' ').toLowerCase();
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
 
   if (
     textFields.includes('429') ||
@@ -54,7 +64,10 @@ function createRotatingFetch(
   rotationService: RpcRotationService,
   baseUrl: string,
 ): typeof fetch {
-  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  return async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
     const maxFailoverAttempts = rotationService.getRpcUrls(chainId).length;
     const attemptedUrls = new Set<string>();
     let lastError: unknown;
@@ -63,7 +76,7 @@ function createRotatingFetch(
       // Trouver le meilleur RPC en excluant ceux déjà tentés
       let selectedUrl: string | null = null;
       const allUrls = rotationService.getRpcUrls(chainId);
-      
+
       // Essayer de trouver un RPC healthy qui n'a pas encore été tenté
       for (const url of allUrls) {
         if (!attemptedUrls.has(url)) {
@@ -74,7 +87,7 @@ function createRotatingFetch(
           }
         }
       }
-      
+
       // Si aucun RPC healthy non tenté trouvé, utiliser getBestRpc en excluant les URLs tentées une par une
       if (!selectedUrl) {
         const excludeUrls = Array.from(attemptedUrls);
@@ -89,16 +102,18 @@ function createRotatingFetch(
           selectedUrl = rotationService.getBestRpc(chainId);
         }
       }
-      
+
       if (!selectedUrl) {
         throw new Error(`No RPC available for chain ${chainId}`);
       }
 
       attemptedUrls.add(selectedUrl);
-      
+
       if (attempt > 0) {
         logger.debug(
-          `RPC rotation: using ${selectedUrl} for chain ${chainId} (attempt ${attempt + 1}/${maxFailoverAttempts})`,
+          `RPC rotation: using ${selectedUrl} for chain ${chainId} (attempt ${
+            attempt + 1
+          }/${maxFailoverAttempts})`,
         );
       }
 
@@ -107,7 +122,7 @@ function createRotatingFetch(
         // Pour les requêtes JSON-RPC, utiliser directement l'URL du RPC sélectionné
         // viem passe l'URL complète, mais on veut toujours utiliser le RPC sélectionné
         const allRpcUrls = rotationService.getRpcUrls(chainId);
-        
+
         // Fonction helper pour remplacer l'URL du RPC
         const replaceRpcUrl = (url: string): string => {
           // Chercher si l'URL contient l'un des RPCs configurés
@@ -123,7 +138,7 @@ function createRotatingFetch(
           // Sinon, utiliser directement selectedUrl (pour les requêtes JSON-RPC)
           return selectedUrl;
         };
-        
+
         if (typeof input === 'string') {
           requestUrl = replaceRpcUrl(input);
         } else if (input instanceof URL) {
@@ -132,53 +147,73 @@ function createRotatingFetch(
           // Request object
           requestUrl = replaceRpcUrl(input.url);
         }
-        
+
         // Logger seulement si on a vraiment changé l'URL
-        const originalUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        const originalUrl =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+            ? input.href
+            : input.url;
         if (requestUrl !== originalUrl) {
           logger.debug(
-            `RPC URL replaced for chain ${chainId}: ${originalUrl.substring(0, 50)}... -> ${selectedUrl}`,
+            `RPC URL replaced for chain ${chainId}: ${originalUrl.substring(
+              0,
+              50,
+            )}... -> ${selectedUrl}`,
           );
         }
 
         const requestInit: RequestInit = {
           ...init,
-          method: init?.method || (input instanceof Request ? input.method : 'POST'),
+          method:
+            init?.method || (input instanceof Request ? input.method : 'POST'),
           headers: {
             'Content-Type': 'application/json',
-            ...(input instanceof Request ? Object.fromEntries(input.headers.entries()) : {}),
+            ...(input instanceof Request
+              ? Object.fromEntries(input.headers.entries())
+              : {}),
             ...init?.headers,
           },
-          body: init?.body || (input instanceof Request ? input.body : undefined),
+          body:
+            init?.body || (input instanceof Request ? input.body : undefined),
         };
 
         const response = await fetch(requestUrl, requestInit);
 
-        if (response.status === 429 || response.status === 402 || 
-            response.status === 401 || response.status === 403) {
+        if (
+          response.status === 429 ||
+          response.status === 402 ||
+          response.status === 401 ||
+          response.status === 403
+        ) {
           rotationService.recordRateLimit(selectedUrl, chainId);
           logger.warn(
             `HTTP ${response.status} received from RPC ${selectedUrl} on chain ${chainId}. Marking as rate-limited and rotating.`,
           );
-          
+
           if (attempt < maxFailoverAttempts - 1) {
-            const errorMsg = response.status === 429 
-              ? `Rate limited on ${selectedUrl}`
-              : response.status === 402
-              ? `Payment required on ${selectedUrl}`
-              : `Unauthorized on ${selectedUrl}`;
+            const errorMsg =
+              response.status === 429
+                ? `Rate limited on ${selectedUrl}`
+                : response.status === 402
+                ? `Payment required on ${selectedUrl}`
+                : `Unauthorized on ${selectedUrl}`;
             lastError = new Error(errorMsg);
             logger.debug(
-              `Attempting RPC rotation for chain ${chainId} (attempt ${attempt + 1}/${maxFailoverAttempts})`,
+              `Attempting RPC rotation for chain ${chainId} (attempt ${
+                attempt + 1
+              }/${maxFailoverAttempts})`,
             );
             continue;
           }
-          
-          const errorMsg = response.status === 429
-            ? `Rate limited on all RPC endpoints for chain ${chainId}`
-            : response.status === 402
-            ? `Payment required on all RPC endpoints for chain ${chainId}`
-            : `Unauthorized on all RPC endpoints for chain ${chainId}`;
+
+          const errorMsg =
+            response.status === 429
+              ? `Rate limited on all RPC endpoints for chain ${chainId}`
+              : response.status === 402
+              ? `Payment required on all RPC endpoints for chain ${chainId}`
+              : `Unauthorized on all RPC endpoints for chain ${chainId}`;
           throw new Error(errorMsg);
         }
 
@@ -187,7 +222,9 @@ function createRotatingFetch(
           try {
             const responseJson = JSON.parse(responseText);
             if (responseJson.error) {
-              const errorMessage = JSON.stringify(responseJson.error).toLowerCase();
+              const errorMessage = JSON.stringify(
+                responseJson.error,
+              ).toLowerCase();
               if (
                 errorMessage.includes('unauthorized') ||
                 errorMessage.includes('authenticate') ||
@@ -201,19 +238,29 @@ function createRotatingFetch(
                 logger.warn(
                   `Rate limit error detected in RPC response from ${selectedUrl} on chain ${chainId}. Marking as rate-limited and rotating.`,
                 );
-                
+
                 if (attempt < maxFailoverAttempts - 1) {
-                  lastError = new Error(`RPC error on ${selectedUrl}: ${responseJson.error.message || 'Unknown error'}`);
+                  lastError = new Error(
+                    `RPC error on ${selectedUrl}: ${
+                      responseJson.error.message || 'Unknown error'
+                    }`,
+                  );
                   logger.debug(
-                    `Attempting RPC rotation for chain ${chainId} (attempt ${attempt + 1}/${maxFailoverAttempts})`,
+                    `Attempting RPC rotation for chain ${chainId} (attempt ${
+                      attempt + 1
+                    }/${maxFailoverAttempts})`,
                   );
                   continue;
                 }
-                
-                throw new Error(`RPC error on all endpoints for chain ${chainId}: ${responseJson.error.message || 'Unknown error'}`);
+
+                throw new Error(
+                  `RPC error on all endpoints for chain ${chainId}: ${
+                    responseJson.error.message || 'Unknown error'
+                  }`,
+                );
               }
             }
-          } catch { }
+          } catch {}
         }
 
         if (response.ok) {
@@ -230,7 +277,9 @@ function createRotatingFetch(
           });
         }
 
-        const error = new Error(`HTTP ${response.status}: ${responseText || 'Unknown error'}`);
+        const error = new Error(
+          `HTTP ${response.status}: ${responseText || 'Unknown error'}`,
+        );
         (error as any).status = response.status;
         rotationService.recordError(selectedUrl, chainId, error);
         throw error;
@@ -242,10 +291,12 @@ function createRotatingFetch(
           logger.warn(
             `Rate limit error detected from RPC ${selectedUrl} on chain ${chainId}. Marking as rate-limited and rotating.`,
           );
-          
+
           if (attempt < maxFailoverAttempts - 1) {
             logger.debug(
-              `Attempting RPC rotation for chain ${chainId} (attempt ${attempt + 1}/${maxFailoverAttempts})`,
+              `Attempting RPC rotation for chain ${chainId} (attempt ${
+                attempt + 1
+              }/${maxFailoverAttempts})`,
             );
             continue;
           }
@@ -259,7 +310,9 @@ function createRotatingFetch(
       }
     }
 
-    throw lastError || new Error(`All RPC endpoints exhausted for chain ${chainId}`);
+    throw (
+      lastError || new Error(`All RPC endpoints exhausted for chain ${chainId}`)
+    );
   };
 }
 
@@ -268,8 +321,10 @@ export function createRotatingTransport(
   rotationService: RpcRotationService,
   retryConfig: RpcRetryConfig,
 ): HttpTransport {
-  const baseUrl = rotationService.getBestRpc(chainId) || rotationService.getRpcUrls(chainId)[0];
-  
+  const baseUrl =
+    rotationService.getBestRpc(chainId) ||
+    rotationService.getRpcUrls(chainId)[0];
+
   if (!baseUrl) {
     throw new Error(`No RPC URLs configured for chain ${chainId}`);
   }

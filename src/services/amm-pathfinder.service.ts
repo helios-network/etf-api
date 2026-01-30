@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ASSETS_ADDRS } from '../constants';
+import { ASSETS_ADDRS } from 'src/constants';
 
 /**
  * Generic path candidate returned by a pool resolver.
@@ -110,7 +110,10 @@ export class AmmPathfinderService {
     // Try direct path
     try {
       const directCandidate = await resolver.direct(meta);
-      if (directCandidate.exists && directCandidate.liquidityUSD >= minLiquidityUSD) {
+      if (
+        directCandidate.exists &&
+        directCandidate.liquidityUSD >= minLiquidityUSD
+      ) {
         candidates.push({
           candidate: directCandidate,
           route: 'direct',
@@ -152,7 +155,10 @@ export class AmmPathfinderService {
           intermediate.decimals,
           intermediate.priceUSD,
         );
-        if (viaCandidate.exists && viaCandidate.liquidityUSD >= minLiquidityUSD) {
+        if (
+          viaCandidate.exists &&
+          viaCandidate.liquidityUSD >= minLiquidityUSD
+        ) {
           candidates.push({
             candidate: viaCandidate,
             route: 'via',
@@ -221,4 +227,3 @@ export class AmmPathfinderService {
     return parts.join('-');
   }
 }
-
