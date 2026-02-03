@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { RedisModule } from '../../database/redis/redis.module';
+import { RedisModule } from 'src/database/redis/redis.module';
+
 import { RpcRateLimitService } from './rpc-rate-limit.service';
 import { RpcRotationService } from './rpc-rotation.service';
 

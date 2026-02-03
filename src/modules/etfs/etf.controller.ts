@@ -5,10 +5,9 @@ import {
   Body,
   Query,
   BadRequestException,
-  HttpException,
-  HttpStatus,
 } from '@nestjs/common';
 import { EtfPriceChartService } from 'src/services';
+import { handleError } from 'src/utils/error';
 
 import { EtfsService } from './etfs.service';
 import { VerifyEtfDto } from './dto/verify-etf.dto';
@@ -22,7 +21,7 @@ export class EtfController {
   constructor(
     private readonly etfsService: EtfsService,
     private readonly etfPriceChartService: EtfPriceChartService,
-  ) {}
+  ) { }
 
   @Get()
   async getAll(
@@ -37,19 +36,7 @@ export class EtfController {
 
       return result;
     } catch (error) {
-      if (error instanceof Error && error.message.includes('must be')) {
-        throw new BadRequestException({
-          success: false,
-          error: error.message,
-        });
-      }
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -59,13 +46,7 @@ export class EtfController {
       const result = await this.etfsService.getStatistics();
       return result;
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -77,13 +58,7 @@ export class EtfController {
     try {
       return await this.etfsService.getDepositTokens(chainId, search);
     } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -99,22 +74,7 @@ export class EtfController {
 
       return result;
     } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      // Internal error
-      throw new HttpException(
-        {
-          status: 'ERROR',
-          reason: 'INTERNAL_ERROR',
-          details: {
-            token: '',
-            message:
-              error instanceof Error ? error.message : 'Unknown error occurred',
-          },
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 
@@ -156,16 +116,7 @@ export class EtfController {
         data: chartData,
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      handleError(error)
     }
   }
 }

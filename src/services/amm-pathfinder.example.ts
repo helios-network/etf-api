@@ -1,18 +1,19 @@
 /**
  * Example usage of the shared AMM pathfinder service
- * 
+ *
  * This file demonstrates how to use the bestPath() function with both
  * Uniswap V2 and V3 resolvers. It shows the shared abstraction in action.
- * 
+ *
  * Note: This is an example file, not meant to be executed directly.
  * Import and use these patterns in your actual code.
  */
 
+import { ASSETS_ADDRS } from 'src/constants';
+import { ChainId } from 'src/config/web3';
+
 import { AmmPathfinderService, PathMetadata } from './amm-pathfinder.service';
 import { UniswapV2ResolverService } from './uniswap-v2-resolver.service';
 import { UniswapV3ResolverService } from './uniswap-v3-resolver.service';
-import { ASSETS_ADDRS } from '../constants';
-import { ChainId } from '../config/web3';
 
 /**
  * Example: Find best V2 path between two tokens
@@ -210,23 +211,18 @@ export async function exampleMultipleIntermediates(
   }
 
   // Try multiple intermediates: WETH and USDC
-  const result = await pathfinder.bestPath(
-    v2Resolver,
-    meta,
-    1000,
-    [
-      {
-        token: weth as `0x${string}`,
-        decimals: 18,
-        priceUSD: null, // Will be estimated
-      },
-      {
-        token: usdc as `0x${string}`,
-        decimals: 6,
-        priceUSD: 1.0, // USDC is stablecoin
-      },
-    ],
-  );
+  const result = await pathfinder.bestPath(v2Resolver, meta, 1000, [
+    {
+      token: weth as `0x${string}`,
+      decimals: 18,
+      priceUSD: null, // Will be estimated
+    },
+    {
+      token: usdc as `0x${string}`,
+      decimals: 6,
+      priceUSD: 1.0, // USDC is stablecoin
+    },
+  ]);
 
   if (result) {
     console.log(`Best path found via: ${result.intermediate}`);
@@ -235,4 +231,3 @@ export async function exampleMultipleIntermediates(
 
   return result;
 }
-

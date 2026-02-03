@@ -1,11 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import {
-  EtfPriceChart,
-  EtfPriceChartDocument,
-} from '../models/etf-price-chart.schema';
-import { normalizeEthAddress } from '../common/utils/eip55';
+import { EtfPriceChart, EtfPriceChartDocument } from 'src/models';
+import { normalizeEthAddress } from 'src/common/utils/eip55';
 
 export type ChartPeriod = '24h' | '7d' | '1m' | 'all';
 
@@ -123,7 +120,8 @@ export class EtfPriceChartService {
 
     for (const entry of filteredEntries) {
       // Calculate which bar this entry belongs to
-      const barStart = Math.floor(entry.timestamp / barIntervalMs) * barIntervalMs;
+      const barStart =
+        Math.floor(entry.timestamp / barIntervalMs) * barIntervalMs;
       if (!barMap.has(barStart)) {
         barMap.set(barStart, []);
       }
@@ -143,8 +141,7 @@ export class EtfPriceChartService {
       const volumes = entries.map((e) => e.volumeUSD);
       const volumeMin = Math.min(...volumes);
       const volumeMax = Math.max(...volumes);
-      const volumeAvg =
-        volumes.reduce((sum, v) => sum + v, 0) / volumes.length;
+      const volumeAvg = volumes.reduce((sum, v) => sum + v, 0) / volumes.length;
 
       // Calculate min, average, max for price
       const prices = entries.map((e) => e.sharePrice);
@@ -188,4 +185,3 @@ export class EtfPriceChartService {
     }
   }
 }
-

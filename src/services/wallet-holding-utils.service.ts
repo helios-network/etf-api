@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { ETF, ETFDocument } from '../models/etf.schema';
-import { normalizeEthAddress } from '../common/utils/eip55';
+import { ETF, ETFDocument } from 'src/models';
+import { normalizeEthAddress } from 'src/common/utils/eip55';
 
 @Injectable()
 export class WalletHoldingUtilsService {
@@ -48,7 +48,9 @@ export class WalletHoldingUtilsService {
 
       // Get ETF from database using the vault address from the deposit
       const normalizedVaultAddress = normalizeEthAddress(vaultAddress);
-      const etf = await this.etfModel.findOne({ vault: normalizedVaultAddress });
+      const etf = await this.etfModel.findOne({
+        vault: normalizedVaultAddress,
+      });
 
       if (!etf) {
         // ETF not found, skip this deposit
@@ -65,7 +67,8 @@ export class WalletHoldingUtilsService {
       const depositDecimals = deposit.decimals ?? etf.shareDecimals ?? 18;
 
       // Convert shares from raw units to human-readable units
-      const sharesInHumanReadable = Number(sharesAmount) / Math.pow(10, depositDecimals);
+      const sharesInHumanReadable =
+        Number(sharesAmount) / Math.pow(10, depositDecimals);
 
       // Calculate value: shares (human-readable) × sharePrice (USD)
       const depositValueUSD = sharesInHumanReadable * sharePriceUSD;

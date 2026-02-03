@@ -1,7 +1,5 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { RewardsController } from './rewards.controller';
-import { RewardsService } from './rewards.service';
 import {
   WalletHolding,
   WalletHoldingSchema,
@@ -10,6 +8,8 @@ import {
 } from 'src/models';
 import { Web3Service, RpcClientModule } from 'src/services';
 
+import { RewardsController } from './rewards.controller';
+import { RewardsService } from './rewards.service';
 @Module({
   imports: [
     MongooseModule.forFeature([
